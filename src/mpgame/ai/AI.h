@@ -1189,6 +1189,7 @@ protected:
 	stateResult_t			State_Dead							( const stateParms_t& parms );
 	stateResult_t			State_LightningDeath				( const stateParms_t& parms );
 	stateResult_t			State_Burn							( const stateParms_t& parms );
+	stateResult_t			State_SinkCorpse					( const stateParms_t& parms );
 	stateResult_t			State_Remove						( const stateParms_t& parms );
 
 	stateResult_t			State_Passive						( const stateParms_t& parms );

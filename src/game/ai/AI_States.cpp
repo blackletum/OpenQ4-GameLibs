@@ -21,6 +21,46 @@ static const int 	RANGED_ENEMYDELAY				= 2000;		// Time to wait to move after lo
 static const int 	COVER_ENEMYDELAY				= 5000;		// Stay behind cover for 5 seconds after loosing sight of an enemy
 
 static const float	COVER_TRIGGERRADIUS				= 64.0f;
+static const int	CORPSE_SINK_TIME_MS			= 1500;
+static const float	CORPSE_SINK_DISTANCE			= 16.0f;
+
+static float AI_GetCorpseRemoveDelaySettingSeconds( void ) {
+	return g_corpseRemoveDelaySP.GetFloat();
+}
+
+static float AI_ResolveCorpseBurnDelaySeconds( float defaultBurnDelay ) {
+	const float overrideDelay = AI_GetCorpseRemoveDelaySettingSeconds();
+
+	if ( overrideDelay < 0.0f ) {
+		return -1.0f;
+	}
+	if ( defaultBurnDelay <= 0.0f ) {
+		return -1.0f;
+	}
+	if ( overrideDelay > 0.0f ) {
+		return overrideDelay;
+	}
+
+	return defaultBurnDelay;
+}
+
+static float AI_ResolveCorpseRemoveDelaySeconds( float defaultBurnDelay, float defaultRemoveDelay ) {
+	const float overrideDelay = AI_GetCorpseRemoveDelaySettingSeconds();
+
+	if ( overrideDelay < 0.0f ) {
+		return -1.0f;
+	}
+	if ( overrideDelay > 0.0f ) {
+		if ( defaultRemoveDelay < 0.0f ) {
+			return -1.0f;
+		}
+
+		const float removeOffset = ( defaultBurnDelay > 0.0f && defaultRemoveDelay > defaultBurnDelay ) ? ( defaultRemoveDelay - defaultBurnDelay ) : 0.0f;
+		return overrideDelay + removeOffset;
+	}
+
+	return defaultRemoveDelay;
+}
 
 CLASS_STATES_DECLARATION ( idAI )
 	// Wait States
@@ -52,6 +92,7 @@ CLASS_STATES_DECLARATION ( idAI )
 	STATE ( "State_Dead",					idAI::State_Dead )
 	STATE ( "State_LightningDeath",			idAI::State_LightningDeath )
 	STATE ( "State_Burn",					idAI::State_Burn )
+	STATE ( "State_SinkCorpse",				idAI::State_SinkCorpse )
 	STATE ( "State_Remove",					idAI::State_Remove )
 	STATE ( "State_ScriptedMove",			idAI::State_ScriptedMove )
 	STATE ( "State_ScriptedFace",			idAI::State_ScriptedFace )
@@ -705,7 +746,35 @@ idAI::State_Dead
 */
 stateResult_t idAI::State_Dead ( const stateParms_t& parms ) {
 	if ( !fl.hidden ) {
-		float burnDelay = spawnArgs.GetFloat ( "burnaway" );
+		const float defaultBurnDelay = spawnArgs.GetFloat( "burnaway" );
+		const float defaultRemoveDelay = spawnArgs.GetFloat( "removeDelay" );
+		float burnDelay = defaultBurnDelay;
+		float removeDelay = defaultRemoveDelay;
+
+		if ( !fl.quickBurn ) {
+			const float overrideDelay = AI_GetCorpseRemoveDelaySettingSeconds();
+			if ( overrideDelay < 0.0f ) {
+				return SRESULT_DONE;
+			}
+
+			if ( g_corpseSink.GetBool() ) {
+				float sinkDelay = -1.0f;
+				if ( defaultBurnDelay > 0.0f ) {
+					sinkDelay = AI_ResolveCorpseBurnDelaySeconds( defaultBurnDelay );
+				} else if ( defaultRemoveDelay >= 0.0f ) {
+					sinkDelay = AI_ResolveCorpseRemoveDelaySeconds( defaultBurnDelay, defaultRemoveDelay );
+				}
+
+				if ( sinkDelay >= 0.0f ) {
+					PostState( "State_SinkCorpse", SEC2MS( sinkDelay ) );
+				}
+				return SRESULT_DONE;
+			}
+
+			burnDelay = AI_ResolveCorpseBurnDelaySeconds( defaultBurnDelay );
+			removeDelay = AI_ResolveCorpseRemoveDelaySeconds( defaultBurnDelay, defaultRemoveDelay );
+		}
+
 		if ( burnDelay > 0.0f ) {
 			if( fl.quickBurn )	{
 				StopRagdoll();
@@ -718,9 +787,8 @@ stateResult_t idAI::State_Dead ( const stateParms_t& parms ) {
 				PostState ( "State_Burn", SEC2MS(burnDelay) );
 			}
 		}
-		float removeDelay = SEC2MS ( spawnArgs.GetFloat ( "removeDelay" ) );
 		if ( removeDelay >= 0.0f ) {
-			PostState ( "State_Remove", removeDelay );
+			PostState ( "State_Remove", SEC2MS( removeDelay ) );
 		}
 	} else {
 		PostState ( "State_Remove" );
@@ -817,6 +885,38 @@ stateResult_t idAI::State_Burn ( const stateParms_t& parms ) {
 	StartSound ( "snd_burn", SND_CHANNEL_BODY, 0, false, NULL ); 				
 
 	return SRESULT_DONE;
+}
+
+/*
+================
+idAI::State_SinkCorpse
+================
+*/
+stateResult_t idAI::State_SinkCorpse( const stateParms_t& parms ) {
+	if ( fl.hidden ) {
+		return SRESULT_DONE;
+	}
+
+	if ( parms.stage == 0 ) {
+		renderEntity.noShadow = true;
+		SetCombatContents( false );
+		fl.takedamage = false;
+		GetPhysics()->DisableClip();
+		return SRESULT_STAGE( 1 );
+	}
+
+	const int elapsed = gameLocal.time - parms.time;
+	if ( elapsed >= CORPSE_SINK_TIME_MS ) {
+		Hide();
+		PostState( "State_Remove" );
+		return SRESULT_DONE;
+	}
+
+	const float sinkStep = CORPSE_SINK_DISTANCE * MS2SEC( gameLocal.GetMSec() ) / MS2SEC( CORPSE_SINK_TIME_MS );
+	GetPhysics()->Translate( GetPhysics()->GetGravityNormal() * sinkStep );
+	UpdateVisuals();
+
+	return SRESULT_WAIT;
 }
 
 /*

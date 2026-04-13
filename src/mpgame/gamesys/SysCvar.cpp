@@ -162,6 +162,9 @@ idCVar g_forceMarineModel(			"g_forceMarineModel",		"",			CVAR_GAME | CVAR_ARCHI
 idCVar g_fixedHorizFOV(				"r_fixedHorizFOV",			"0",			CVAR_RENDERER | CVAR_BOOL, "vertical stretch for letterboxed cinematics authored for 4:3 aspect" );
 idCVar g_cinematic(					"g_cinematic",				"1",			CVAR_GAME | CVAR_BOOL, "skips updating entities that aren't marked 'cinematic' '1' during cinematics" );
 idCVar g_cinematicMaxSkipTime(		"g_cinematicMaxSkipTime",	"600",			CVAR_GAME | CVAR_FLOAT, "# of seconds to allow game to run when skipping cinematic.  prevents lock-up when cinematic doesn't end.", 0, 3600 );
+idCVar g_autoSkipCinematics(		"g_autoSkipCinematics",		"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "automatically skips cinematics as soon as they start" );
+idCVar g_corpseRemoveDelayMP(		"g_corpseRemoveDelayMP",	"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_FLOAT, "seconds before multiplayer corpses begin disappearing (0 = stock timing, -1 = never)", -1, 3600 );
+idCVar g_corpseSink(				"g_corpseSink",				"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "use Quake 3 style corpse sinking instead of dissolve/burn-away" );
 
 idCVar g_muzzleFlash(				"g_muzzleFlash",			"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "show muzzle flashes" );
 idCVar g_projectileLights(			"g_projectileLights",		"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "show dynamic lights on projectiles" );

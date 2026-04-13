@@ -1066,7 +1066,7 @@ void Cmd_GotoLevelshot_f( const idCmdArgs &args ) {
 	idAngles	angles;
 	int			parsedCount;
 	char		*buffer = NULL;
-	const int	numRead;
+	int			numRead;
 
 	player = gameLocal.GetLocalPlayer();
 	if ( !player || !gameLocal.CheatsOk() ) {
@@ -1113,14 +1113,18 @@ void Cmd_SetViewpos_f( const idCmdArgs &args ) {
 		return;
 	}
 
-	if ( ( args.Argc() != 4 ) && ( args.Argc() != 5 ) ) {
-		gameLocal.Printf( "usage: setviewpos <x> <y> <z> <yaw>\n" );
+	if ( ( args.Argc() != 4 ) && ( args.Argc() != 5 ) && ( args.Argc() != 7 ) ) {
+		gameLocal.Printf( "usage: setviewpos <x> <y> <z> [yaw] | <x> <y> <z> <pitch> <yaw> <roll>\n" );
 		return;
 	}
 
 	angles.Zero();
 	if ( args.Argc() == 5 ) {
 		angles.yaw = atof( args.Argv( 4 ) );
+	} else if ( args.Argc() == 7 ) {
+		angles.pitch = atof( args.Argv( 4 ) );
+		angles.yaw = atof( args.Argv( 5 ) );
+		angles.roll = atof( args.Argv( 6 ) );
 	}
 
 	for ( i = 0 ; i < 3 ; i++ ) {

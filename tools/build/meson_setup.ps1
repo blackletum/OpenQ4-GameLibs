@@ -90,14 +90,14 @@ function Test-MesonBuildDirectory {
     return (Test-Path $coreData) -and (Test-Path $ninjaFile)
 }
 
-function Copy-GameLibrariesToOpenQ4Install {
+function Copy-GameLibrariesToInstallGameDir {
     param(
         [string]$BuildDir,
         [string]$RepoRoot
     )
 
-    $openQ4InstallDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "..\OpenQ4\.install\openq4"))
-    New-Item -Path $openQ4InstallDir -ItemType Directory -Force | Out-Null
+    $installGameDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "..\OpenQ4\.install\baseoq4"))
+    New-Item -Path $installGameDir -ItemType Directory -Force | Out-Null
 
     $binaries = @(
         "game-sp_x86.dll",
@@ -110,11 +110,11 @@ function Copy-GameLibrariesToOpenQ4Install {
             throw "Expected build output '$sourcePath' was not found."
         }
 
-        $destinationPath = Join-Path $openQ4InstallDir $binary
+        $destinationPath = Join-Path $installGameDir $binary
         Copy-Item -Path $sourcePath -Destination $destinationPath -Force
     }
 
-    Write-Host "Copied game libraries to '$openQ4InstallDir'."
+    Write-Host "Copied game libraries to '$installGameDir'."
 }
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -169,7 +169,7 @@ $exitCode = [int]$LASTEXITCODE
 
 if ($exitCode -eq 0 -and $isCompileCommand -and $env:OPENQ4_COPY_GAMELIBS_TO_INSTALL -eq "1") {
     $compileBuildInfo = Get-BuildDirInfo -MesonArgs $effectiveArgs -DefaultBuildDir $defaultBuildDir
-    Copy-GameLibrariesToOpenQ4Install -BuildDir $compileBuildInfo.BuildDir -RepoRoot $repoRoot
+    Copy-GameLibrariesToInstallGameDir -BuildDir $compileBuildInfo.BuildDir -RepoRoot $repoRoot
 }
 
 exit $exitCode

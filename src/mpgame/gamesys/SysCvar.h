@@ -6,6 +6,9 @@ extern idCVar	developer;
 
 extern idCVar	g_cinematic;
 extern idCVar	g_cinematicMaxSkipTime;
+extern idCVar	g_autoSkipCinematics;
+extern idCVar	g_corpseRemoveDelayMP;
+extern idCVar	g_corpseSink;
 
 // RAVEN BEGIN
 // jnewquist: vertical stretch for letterboxed cinematics authored for 4:3 aspect

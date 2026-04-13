@@ -945,6 +945,7 @@ private:
 	int						rank;
 
 	int						deathSkinTime;
+	int						corpseSinkStartTime;
 	bool					deathStateHitch;
 
 	playerEmote_t			emote;

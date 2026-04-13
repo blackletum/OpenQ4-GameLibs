@@ -5,55 +5,6 @@
 #include "Effect.h"
 #include "client/ClientEffect.h"
 
-namespace {
-
-static bool rvEffect_HasShaderParm( const idDict& source, int parm ) {
-	return source.FindKey( va( "shaderParm%d", parm ) ) != NULL;
-}
-
-static void rvEffect_UpdateRenderEntityShaderParms( const idDict& source, renderEntity_t& renderEntity ) {
-	idVec3 color;
-	source.GetVector( "_color", "1 1 1", color );
-	renderEntity.shaderParms[ SHADERPARM_RED ] = color[ 0 ];
-	renderEntity.shaderParms[ SHADERPARM_GREEN ] = color[ 1 ];
-	renderEntity.shaderParms[ SHADERPARM_BLUE ] = color[ 2 ];
-
-	for ( int parm = SHADERPARM_ALPHA; parm < MAX_ENTITY_SHADER_PARMS; ++parm ) {
-		renderEntity.shaderParms[ parm ] = source.GetFloat( va( "shaderParm%d", parm ), ( parm == SHADERPARM_ALPHA ) ? "1" : "0" );
-	}
-
-	if ( source.FindKey( "_alpha" ) != NULL ) {
-		renderEntity.shaderParms[ SHADERPARM_ALPHA ] = source.GetFloat( "_alpha", "1" );
-	}
-
-	if ( source.FindKey( "_brightness" ) != NULL ) {
-		renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ] = source.GetFloat( "_brightness", "1" );
-	} else if ( !rvEffect_HasShaderParm( source, SHADERPARM_BRIGHTNESS ) ) {
-		renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ] = 1.0f;
-	}
-}
-
-static void rvEffect_ApplyShaderParms( const idDict& source, const renderEntity_t& renderEntity, renderEffect_t& renderEffect ) {
-	renderEffect.shaderParms[ SHADERPARM_RED ] = renderEntity.shaderParms[ SHADERPARM_RED ];
-	renderEffect.shaderParms[ SHADERPARM_GREEN ] = renderEntity.shaderParms[ SHADERPARM_GREEN ];
-	renderEffect.shaderParms[ SHADERPARM_BLUE ] = renderEntity.shaderParms[ SHADERPARM_BLUE ];
-	renderEffect.shaderParms[ SHADERPARM_ALPHA ] = renderEntity.shaderParms[ SHADERPARM_ALPHA ];
-	renderEffect.shaderParms[ 5 ] = renderEntity.shaderParms[ 5 ];
-	renderEffect.shaderParms[ SHADERPARM_BRIGHTNESS ] = renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ];
-	renderEffect.shaderParms[ SHADERPARM_MODE ] = renderEntity.shaderParms[ SHADERPARM_MODE ];
-	renderEffect.shaderParms[ SHADERPARM_SPRITE_WIDTH ] = renderEntity.shaderParms[ SHADERPARM_SPRITE_WIDTH ];
-	renderEffect.shaderParms[ SHADERPARM_SPRITE_HEIGHT ] = renderEntity.shaderParms[ SHADERPARM_SPRITE_HEIGHT ];
-	renderEffect.shaderParms[ 10 ] = renderEntity.shaderParms[ 10 ];
-	renderEffect.shaderParms[ 11 ] = renderEntity.shaderParms[ 11 ];
-
-	// rvClientEffect::Play seeds the default animated-material time offset.
-	renderEffect.shaderParms[ SHADERPARM_TIMEOFFSET ] = rvEffect_HasShaderParm( source, SHADERPARM_TIMEOFFSET )
-		? renderEntity.shaderParms[ SHADERPARM_TIMEOFFSET ]
-		: MS2SEC( gameLocal.time );
-}
-
-}
-
 const idEventDef EV_LookAtTarget( "lookAtTarget", NULL );
 const idEventDef EV_Attenuate( "attenuate", "f" );
 
@@ -107,7 +58,8 @@ void rvEffect::Spawn( void ) {
 	// If look at target is set the effect will continually update itself to look at its target
 	spawnArgs.GetBool( "lookAtTarget", "0", lookAtTarget );
 
-	rvEffect_UpdateRenderEntityShaderParms( spawnArgs, renderEntity );
+	renderEntity.shaderParms[SHADERPARM_ALPHA] = spawnArgs.GetFloat ( "_alpha", "1" );
+	renderEntity.shaderParms[SHADERPARM_BRIGHTNESS] = spawnArgs.GetFloat ( "_brightness", "1" );
 
     if( spawnArgs.GetBool( "start_on", loop ? "1" : "0" ) ) {
 		ProcessEvent( &EV_Activate, this );
@@ -193,7 +145,13 @@ rvEffect::Play
 bool rvEffect::Play( void ) {
 	clientEffect = PlayEffect ( effect, renderEntity.origin, renderEntity.axis, loop, endOrigin );
 	if ( clientEffect ) {
-		rvEffect_ApplyShaderParms( spawnArgs, renderEntity, *clientEffect->GetRenderEffect() );
+		idVec4 color;
+		color[0] = renderEntity.shaderParms[SHADERPARM_RED];
+		color[1] = renderEntity.shaderParms[SHADERPARM_GREEN];
+		color[2] = renderEntity.shaderParms[SHADERPARM_BLUE];
+		color[3] = renderEntity.shaderParms[SHADERPARM_ALPHA];
+		clientEffect->SetColor ( color );
+		clientEffect->SetBrightness ( renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ] );
 		clientEffect->SetAmbient( true );
 
 		BecomeActive ( TH_THINK );
@@ -254,9 +212,16 @@ void rvEffect::UpdateChangeableSpawnArgs( const idDict *source ) {
 		newEffect = NULL;
 	}
 
-	rvEffect_UpdateRenderEntityShaderParms( *source, renderEntity );
+	idVec3 color;
+	source->GetVector( "_color", "1 1 1", color );
+	renderEntity.shaderParms[ SHADERPARM_RED ]	 = color[0];
+	renderEntity.shaderParms[ SHADERPARM_GREEN ] = color[1];
+	renderEntity.shaderParms[ SHADERPARM_BLUE ]	 = color[2];
+	renderEntity.shaderParms[ SHADERPARM_ALPHA ] = source->GetFloat ( "_alpha", "1" );
+	renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ] = source->GetFloat ( "_brightness", "1" );
 	if ( clientEffect ) {		
-		rvEffect_ApplyShaderParms( *source, renderEntity, *clientEffect->GetRenderEffect() );
+		clientEffect->SetColor ( idVec4(color[0],color[1],color[2],renderEntity.shaderParms[ SHADERPARM_ALPHA ]) );
+		clientEffect->SetBrightness ( renderEntity.shaderParms[ SHADERPARM_BRIGHTNESS ] );
 	}
 
 	source->GetBool ( "loop", "0", newLoop );

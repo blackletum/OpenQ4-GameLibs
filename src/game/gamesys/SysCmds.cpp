@@ -1150,14 +1150,18 @@ void Cmd_SetViewpos_f( const idCmdArgs &args ) {
 		return;
 	}
 
-	if ( ( args.Argc() != 4 ) && ( args.Argc() != 5 ) ) {
-		gameLocal.Printf( "usage: setviewpos <x> <y> <z> <yaw>\n" );
+	if ( ( args.Argc() != 4 ) && ( args.Argc() != 5 ) && ( args.Argc() != 7 ) ) {
+		gameLocal.Printf( "usage: setviewpos <x> <y> <z> [yaw] | <x> <y> <z> <pitch> <yaw> <roll>\n" );
 		return;
 	}
 
 	angles.Zero();
 	if ( args.Argc() == 5 ) {
 		angles.yaw = atof( args.Argv( 4 ) );
+	} else if ( args.Argc() == 7 ) {
+		angles.pitch = atof( args.Argv( 4 ) );
+		angles.yaw = atof( args.Argv( 5 ) );
+		angles.roll = atof( args.Argv( 6 ) );
 	}
 
 	for ( i = 0 ; i < 3 ; i++ ) {
@@ -1171,12 +1175,12 @@ void Cmd_SetViewpos_f( const idCmdArgs &args ) {
 	const bool touchedTriggers = player->TouchTriggers();
 	const idBounds playerBounds = player->GetPhysics()->GetAbsBounds();
 	gameLocal.Printf(
-		"DBG setviewpos raw=(%.1f %.1f %.1f) origin=(%.1f %.1f %.1f) yaw=%.1f touched=%d clipWorld=%d boundsMins=(%.1f %.1f %.1f) boundsMaxs=(%.1f %.1f %.1f)\n",
+		"DBG setviewpos raw=(%.1f %.1f %.1f) origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f) touched=%d clipWorld=%d boundsMins=(%.1f %.1f %.1f) boundsMaxs=(%.1f %.1f %.1f)\n",
 		atof( args.Argv( 1 ) ),
 		atof( args.Argv( 2 ) ),
 		atof( args.Argv( 3 ) ),
 		origin.x, origin.y, origin.z,
-		angles.yaw,
+		angles.pitch, angles.yaw, angles.roll,
 		touchedTriggers ? 1 : 0,
 		player->GetClipWorld(),
 		playerBounds[0].x, playerBounds[0].y, playerBounds[0].z,

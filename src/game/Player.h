@@ -987,6 +987,7 @@ private:
 	int						rank;
 
 	int						deathSkinTime;
+	int						corpseSinkStartTime;
 	bool					deathStateHitch;
 
 	playerEmote_t			emote;
@@ -1036,6 +1037,9 @@ private:
 	void					DrawWeaponWheel( void );
 	int						GetWeaponWheelSlotForWeapon( int weaponIndex ) const;
 	int						GetWeaponWheelWeaponForSlot( int slot ) const;
+	bool					HasWeaponWheelSlotWeapon( int slot ) const;
+	int						GetDefaultWeaponWheelSlot( void ) const;
+	int						GetClosestAvailableWeaponWheelSlot( float angle ) const;
 	int						GetWeaponWheelAmmoCount( int weaponIndex );
 	bool					IsWeaponWheelSlotLowAmmo( int slot );
 

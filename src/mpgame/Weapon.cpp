@@ -3216,11 +3216,28 @@ void rvWeapon::CacheWeapon( const char *weaponName ) {
 	const idDeclEntityDef *weaponDef;
 	const char *brassDefName;
 	const char *clipModelName;
+	const idKeyValue *kv;
 	idTraceModel trm;
 
 	weaponDef = gameLocal.FindEntityDef( weaponName, false );
 	if ( !weaponDef ) {
 		return;
+	}
+
+	// Local MP clients instantiate weapon classes on demand when a newly acquired
+	// weapon becomes active. Warm the full weapon dict so that first-use asset
+	// loads do not stall the frame during the pickup/switch path.
+	gameLocal.CacheDictionaryMedia( &weaponDef->dict );
+
+	kv = weaponDef->dict.MatchPrefix( "def_", NULL );
+	while ( kv ) {
+		if ( kv->GetValue().Length() ) {
+			const idDeclEntityDef *relatedDef = gameLocal.FindEntityDef( kv->GetValue().c_str(), false );
+			if ( relatedDef ) {
+				gameLocal.CacheDictionaryMedia( &relatedDef->dict );
+			}
+		}
+		kv = weaponDef->dict.MatchPrefix( "def_", kv );
 	}
 
 	// precache the brass collision model
@@ -3240,8 +3257,6 @@ void rvWeapon::CacheWeapon( const char *weaponName ) {
 			}
 		}
 	}
-
-	const idKeyValue* kv;
 
 	kv = weaponDef->dict.MatchPrefix( "gui", NULL );
 	while( kv ) {

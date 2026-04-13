@@ -74,10 +74,25 @@ const int	RAGDOLL_DEATH_TIME	= 3000;
 	const int	RAGDOLL_DEATH_TIME_XEN_SP	= 1000;
 	const int	MAX_RESPAWN_TIME_XEN_SP	= 3000;
 #endif
+const int	CORPSE_SINK_TIME_MS	= 1500;
+const float	CORPSE_SINK_DISTANCE = 16.0f;
 const int	STEPUP_TIME			= 200;
 const int	MAX_INVENTORY_ITEMS = 20;
 
 const int	ARENA_POWERUP_MASK = ( 1 << POWERUP_AMMOREGEN ) | ( 1 << POWERUP_GUARD ) | ( 1 << POWERUP_DOUBLER ) | ( 1 << POWERUP_SCOUT );
+
+static int Player_GetCorpseRemoveDelayMS( void ) {
+	const float overrideDelay = g_corpseRemoveDelayMP.GetFloat();
+
+	if ( overrideDelay < 0.0f ) {
+		return -1;
+	}
+	if ( overrideDelay > 0.0f ) {
+		return SEC2MS( overrideDelay );
+	}
+
+	return 1000;
+}
 
 //const idEventDef EV_Player_HideDatabaseEntry ( "<hidedatabaseentry>", NULL );
 const idEventDef EV_Player_ZoomIn ( "<zoomin>" );
@@ -1145,6 +1160,7 @@ idPlayer::idPlayer() {
 
 	lastDmgTime				= 0;
 	deathClearContentsTime	= 0;
+	corpseSinkStartTime		= 0;
 	nextHealthPulse			= 0;
 
 	scoreBoardOpen			= false;
@@ -1344,6 +1360,7 @@ idPlayer::idPlayer() {
 	vsMsgState = false;
 
 	deathSkinTime = 0;
+	corpseSinkStartTime = 0;
 
 	lastPickupTime = 0;
 
@@ -1796,6 +1813,7 @@ void idPlayer::Init( void ) {
 	}
 	
 	deathSkinTime		= 0;
+	corpseSinkStartTime	= 0;
 	deathStateHitch		= false;
 
 	lastPickupTime = 0;
@@ -2176,6 +2194,7 @@ void idPlayer::Save( idSaveGame *savefile ) const {
 
 	savefile->WriteInt( lastDmgTime );
 	savefile->WriteInt( deathClearContentsTime );
+	savefile->WriteInt( corpseSinkStartTime );
  	savefile->WriteBool( doingDeathSkin );
  	savefile->WriteInt( nextHealthPulse );
  	savefile->WriteInt( nextArmorPulse );
@@ -2451,6 +2470,7 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
 
 	savefile->ReadInt( lastDmgTime );
 	savefile->ReadInt( deathClearContentsTime );
+	savefile->ReadInt( corpseSinkStartTime );
  	savefile->ReadBool( doingDeathSkin );
  	savefile->ReadInt( nextHealthPulse );
  	savefile->ReadInt( nextArmorPulse );
@@ -9335,9 +9355,29 @@ void idPlayer::UpdateDeathSkin( bool state_hitch ) {
 		return;
 	}
  	if ( health <= 0 ) {
+		if ( corpseSinkStartTime ) {
+			const int elapsed = gameLocal.time - corpseSinkStartTime;
+			if ( elapsed >= CORPSE_SINK_TIME_MS ) {
+				Hide();
+				corpseSinkStartTime = 0;
+				deathSkinTime = 0;
+				deathClearContentsTime = 0;
+				doingDeathSkin = false;
+				return;
+			}
+
+			const float sinkStep = CORPSE_SINK_DISTANCE * MS2SEC( gameLocal.GetMSec() ) / MS2SEC( CORPSE_SINK_TIME_MS );
+			GetPhysics()->Translate( GetPhysics()->GetGravityNormal() * sinkStep );
+			UpdateVisuals();
+			return;
+		}
+
  		if ( !doingDeathSkin && !deathSkinTime ) {
-			deathSkinTime = gameLocal.time + 1000;
-			deathStateHitch = state_hitch;
+			const int corpseDelayMS = Player_GetCorpseRemoveDelayMS();
+			if ( corpseDelayMS >= 0 ) {
+				deathSkinTime = gameLocal.time + corpseDelayMS;
+				deathStateHitch = state_hitch;
+			}
 		}
 
 		// wait a bit before switching off the content
@@ -9351,15 +9391,19 @@ void idPlayer::UpdateDeathSkin( bool state_hitch ) {
 		if( gameLocal.isMultiplayer ) {
 			if( clientHead ) {
 				clientHead->GetRenderEntity()->shaderParms[ SHADERPARM_TIME_OF_DEATH ] = 0.0f;
+				clientHead->GetRenderEntity()->noShadow = false;
 			}
 		} else {
 			if( head ) {
 				head.GetEntity()->GetRenderEntity()->shaderParms[ SHADERPARM_TIME_OF_DEATH ] = 0.0f;
+				head.GetEntity()->GetRenderEntity()->noShadow = false;
 			}
 		}
 		UpdateVisuals();
  		doingDeathSkin = false;
+		deathSkinTime = 0;
 		deathClearContentsTime = 0;
+		corpseSinkStartTime = 0;
 	}
 }
 
@@ -12796,7 +12840,19 @@ void idPlayer::ReadPlayerStateFromSnapshot( const idBitMsgDelta &msg ) {
 	}
 
 	if ( gameLocal.IsMultiplayer() ) {
-		if ( (inventory.weapons&~oldInventoryWeapons)  ) {
+		const int newWeapons = inventory.weapons & ~oldInventoryWeapons;
+		if ( newWeapons ) {
+			for ( int weaponIndex = 0; weaponIndex < MAX_WEAPONS; weaponIndex++ ) {
+				if ( ( newWeapons & ( 1 << weaponIndex ) ) == 0 ) {
+					continue;
+				}
+
+				const char *weaponName = spawnArgs.GetString( va( "def_weapon%d", weaponIndex ) );
+				if ( weaponName[0] ) {
+					rvWeapon::CacheWeapon( weaponName );
+				}
+			}
+
 			//added a weapon from inventory, bring up bar
 			UpdateHudWeapon();
 		}
@@ -13988,7 +14044,30 @@ void idPlayer::UpdateDeathShader ( bool state_hitch ) {
 	if ( !doingDeathSkin && gameLocal.time > deathSkinTime && deathSkinTime ) {
 		deathSkinTime = 0;
 
-		deathClearContentsTime = spawnArgs.GetInt( "deathSkinTime" );
+		if ( g_corpseSink.GetBool() ) {
+			corpseSinkStartTime = gameLocal.time;
+			deathClearContentsTime = 0;
+			doingDeathSkin = true;
+			renderEntity.noShadow = true;
+
+			if( gameLocal.isMultiplayer ) {
+				if( clientHead ) {
+					clientHead.GetEntity()->GetRenderEntity()->noShadow = true;
+				}
+			} else {
+				if( head ) {
+					head.GetEntity()->GetRenderEntity()->noShadow = true;
+				}
+			}
+
+			SetCombatContents( false );
+			fl.takedamage = false;
+			GetPhysics()->DisableClip();
+			UpdateVisuals();
+			return;
+		}
+
+		deathClearContentsTime = gameLocal.time + spawnArgs.GetInt( "deathSkinTime" );
 		doingDeathSkin = true;
 		if ( state_hitch ) {
 			renderEntity.shaderParms[ SHADERPARM_TIME_OF_DEATH ] = gameLocal.time * 0.001f - 2.0f;

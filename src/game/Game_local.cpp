@@ -6581,6 +6581,10 @@ void idGameLocal::SetCamera( idCamera *cam ) {
 			}
 		}
 
+		if ( inCinematic && g_autoSkipCinematics.GetBool() ) {
+			SkipCinematic();
+		}
+
 	} else {
 		inCinematic = false;
 		cinematicStopTime = time + msec;
