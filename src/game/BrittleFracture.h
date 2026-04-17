@@ -19,6 +19,10 @@ typedef struct shard_s {
 	idList<bool>				edgeHasNeighbour;
 	idList<struct shard_s *>	neighbours;
 	idPhysics_RigidBody			physicsObj;
+	idVec3						presentationPrevOrigin;
+	idVec3						presentationCurOrigin;
+	idMat3						presentationPrevAxis;
+	idMat3						presentationCurAxis;
 	int							droppedTime;
 	bool						atEdge;
 	int							islandNum;
@@ -39,6 +43,7 @@ public:
 	void						Spawn( void );
 
 	virtual void				Present( void );
+	virtual void				UpdatePresentationNonModelVisuals( void );
 	virtual void				Think( void );
 	virtual void				ApplyImpulse( idEntity *ent, int id, const idVec3 &point, const idVec3 &impulse, bool splash = false );
 	virtual void				AddForce( idEntity *ent, int id, const idVec3 &point, const idVec3 &force );
@@ -78,13 +83,18 @@ private:
 	idList<shard_t *>			shards;
 	idBounds					bounds;
 	bool						disableFracture;
+	int							presentationTime;
+	int							presentationRenderSerial;
+	bool						presentationNeedsInterpolatedRefresh;
 
 	// for rendering
 	mutable int					lastRenderEntityUpdate;
+	mutable int					lastRenderEntityUpdateSerial;
 	mutable bool				changed;
 
 	bool						UpdateRenderEntity( renderEntity_s *renderEntity, const renderView_t *renderView ) const;
 	static bool					ModelCallback( renderEntity_s *renderEntity, const renderView_t *renderView );
+	void						UpdateShardPresentationState( void );
 
 	void						AddShard( idClipModel *clipModel, idFixedWinding &w );
 	void						RemoveShard( int index );

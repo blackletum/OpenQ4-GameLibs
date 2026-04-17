@@ -35,6 +35,7 @@ public:
 	virtual bool			Pickup( idPlayer *player );
 	virtual void			Think( void );
 	virtual void			Present();
+	virtual void			UpdatePresentationNonModelVisuals( void );
 	virtual	void			InstanceJoin( void );
 	virtual void			InstanceLeave( void );
 	virtual bool			GetPhysicsToVisualTransform( idVec3 &origin, idMat3 &axis );

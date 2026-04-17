@@ -287,7 +287,7 @@ class rvCameraPlayback : public idCamera {
 public:
 	CLASS_PROTOTYPE( rvCameraPlayback );
 
-							rvCameraPlayback( void ) {}
+							rvCameraPlayback( void );
 							~rvCameraPlayback( void ) {}
 
 	// save games
@@ -300,6 +300,12 @@ public:
 private:
 	int						startTime;
 	const rvDeclPlayback	*playback;
+	int						presentationViewTime;
+	bool					presentationCanInterpolate;
+	idVec3					presentationPrevViewOrigin;
+	idMat3					presentationPrevViewAxis;
+	idVec3					presentationCurViewOrigin;
+	idMat3					presentationCurViewAxis;
 };
 // RAVEN END
 

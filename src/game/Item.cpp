@@ -359,6 +359,26 @@ void idItem::Present( void ) {
 
 /*
 ================
+idItem::UpdatePresentationNonModelVisuals
+================
+*/
+void idItem::UpdatePresentationNonModelVisuals( void ) {
+	idEntity::UpdatePresentationNonModelVisuals();
+
+	if ( gameLocal.isNewFrame || itemShellHandle == -1 || !pulse || IsHidden() ) {
+		return;
+	}
+
+	renderEntity_t presentationShell = renderEntity;
+	GetPresentationTransform( presentationShell.origin, presentationShell.axis );
+	presentationShell.callback = idItem::ModelCallback;
+	presentationShell.entityNum = entityNumber;
+	presentationShell.customShader = shellMaterial;
+	gameRenderWorld->UpdateEntityDef( itemShellHandle, &presentationShell );
+}
+
+/*
+================
 idItem::InstanceJoin
 ================
 */

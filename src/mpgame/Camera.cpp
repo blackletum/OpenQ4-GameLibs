@@ -2269,7 +2269,8 @@ void rvCameraPortalSky::GetViewParms( renderView_t *view )
 	assert( view );
 	if( view ) 
 	{
-		view->vieworg = GetPhysics()->GetOrigin();
+		idMat3 unusedAxis;
+		GetPresentationTransformForView( view->vieworg, unusedAxis );
 		view->viewID = -1;
 	}
 }
@@ -2283,6 +2284,22 @@ void rvCameraPortalSky::GetViewParms( renderView_t *view )
 
 CLASS_DECLARATION( idCamera, rvCameraPlayback )
 END_CLASS
+
+/*
+===============
+rvCameraPlayback::rvCameraPlayback
+================
+*/
+rvCameraPlayback::rvCameraPlayback( void ) {
+	startTime = 0;
+	playback = NULL;
+	presentationViewTime = -1;
+	presentationCanInterpolate = false;
+	presentationPrevViewOrigin = vec3_zero;
+	presentationPrevViewAxis = mat3_identity;
+	presentationCurViewOrigin = vec3_zero;
+	presentationCurViewAxis = mat3_identity;
+}
 
 /*
 ===============
@@ -2313,6 +2330,12 @@ void rvCameraPlayback::Spawn( void )
 {
 	startTime = gameLocal.time;
 	playback = declManager->PlaybackByIndex( g_currentPlayback.GetInteger() );
+	presentationViewTime = -1;
+	presentationCanInterpolate = false;
+	presentationPrevViewOrigin = vec3_zero;
+	presentationPrevViewAxis = mat3_identity;
+	presentationCurViewOrigin = vec3_zero;
+	presentationCurViewAxis = mat3_identity;
 }
 
 /*
@@ -2328,13 +2351,47 @@ void rvCameraPlayback::GetViewParms( renderView_t *view )
 	if( view ) 
 	{
 		pbd.Init();
-		if( declManager->GetPlaybackData( playback, PBFL_GET_POSITION | PBFL_GET_ANGLES_FROM_VEL, gameLocal.time - startTime, gameLocal.time - startTime, &pbd ) )
+		const bool wrapped = declManager->GetPlaybackData( playback, PBFL_GET_POSITION | PBFL_GET_ANGLES_FROM_VEL, gameLocal.time - startTime, gameLocal.time - startTime, &pbd );
+		if ( wrapped )
 		{
 			startTime = gameLocal.time;
 		}
 
-		view->vieworg = pbd.GetPosition();
-		view->viewaxis = pbd.GetAngles().ToMat3();
+		const idVec3 simViewOrigin = pbd.GetPosition();
+		const idMat3 simViewAxis = pbd.GetAngles().ToMat3();
+		const bool exactGameFrameRate = ( gameLocal.GetMHz() == common->GetUserCmdHz() );
+		if ( presentationViewTime < 0 ) {
+			presentationViewTime = gameLocal.time;
+			presentationCanInterpolate = false;
+			presentationPrevViewOrigin = simViewOrigin;
+			presentationPrevViewAxis = simViewAxis;
+			presentationCurViewOrigin = simViewOrigin;
+			presentationCurViewAxis = simViewAxis;
+		} else if ( presentationViewTime != gameLocal.time ) {
+			const bool sequentialFrame = ( presentationViewTime == GameLocal_PreviousFrameTime() );
+			presentationPrevViewOrigin = presentationCurViewOrigin;
+			presentationPrevViewAxis = presentationCurViewAxis;
+			presentationCurViewOrigin = simViewOrigin;
+			presentationCurViewAxis = simViewAxis;
+			presentationViewTime = gameLocal.time;
+			presentationCanInterpolate = exactGameFrameRate && sequentialFrame && !wrapped;
+			if ( !presentationCanInterpolate ) {
+				presentationPrevViewOrigin = presentationCurViewOrigin;
+				presentationPrevViewAxis = presentationCurViewAxis;
+			}
+		} else {
+			presentationCurViewOrigin = simViewOrigin;
+			presentationCurViewAxis = simViewAxis;
+		}
+
+		if ( presentationCanInterpolate ) {
+			const float fraction = GameLocal_GetPresentationInterpolationFraction();
+			view->vieworg.Lerp( presentationPrevViewOrigin, presentationCurViewOrigin, fraction );
+			view->viewaxis = GameLocal_InterpolateAxis( presentationPrevViewAxis, presentationCurViewAxis, fraction );
+		} else {
+			view->vieworg = presentationCurViewOrigin;
+			view->viewaxis = presentationCurViewAxis;
+		}
 
 		// field of view
 // RAVEN BEGIN

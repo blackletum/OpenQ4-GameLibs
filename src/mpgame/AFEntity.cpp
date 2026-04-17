@@ -5,6 +5,35 @@
 #include "Game_local.h"
 #include "Projectile.h"
 
+namespace {
+ID_INLINE float AFEntity_GetPresentationInterpolationFraction( void ) {
+	if ( gameLocal.GetDemoState() == DEMO_PLAYING || gameLocal.IsTimeDemo() ) {
+		return 1.0f;
+	}
+
+	const float ticMsec = common->GetUserCmdMsecFloat();
+	if ( ticMsec <= 0.0f ) {
+		return 1.0f;
+	}
+
+	return idMath::ClampFloat( 0.0f, 1.0f,
+		static_cast<float>( Sys_Milliseconds() - gameLocal.GetTime() ) / ticMsec );
+}
+
+ID_INLINE idMat3 AFEntity_InterpolateAxis( const idMat3 &from, const idMat3 &to, float fraction ) {
+	if ( fraction <= 0.0f ) {
+		return from;
+	}
+	if ( fraction >= 1.0f ) {
+		return to;
+	}
+
+	idQuat blended;
+	blended.Slerp( from.ToQuat(), to.ToQuat(), fraction );
+	return blended.ToMat3();
+}
+}
+
 /*
 ===============================================================================
 
@@ -23,6 +52,11 @@ idMultiModelAF::Spawn
 */
 void idMultiModelAF::Spawn( void ) {
 	physicsObj.SetSelf( this );
+	presentationTime = -1;
+	presentationPrevOrigins.Clear();
+	presentationCurOrigins.Clear();
+	presentationPrevAxes.Clear();
+	presentationCurAxes.Clear();
 }
 
 /*
@@ -51,6 +85,10 @@ idMultiModelAF::SetModelForId
 void idMultiModelAF::SetModelForId( int id, const idStr &modelName ) {
 	modelHandles.AssureSize( id+1, NULL );
 	modelDefHandles.AssureSize( id+1, -1 );
+	presentationPrevOrigins.AssureSize( id+1, vec3_origin );
+	presentationCurOrigins.AssureSize( id+1, vec3_origin );
+	presentationPrevAxes.AssureSize( id+1, mat3_identity );
+	presentationCurAxes.AssureSize( id+1, mat3_identity );
 	modelHandles[id] = renderModelManager->FindModel( modelName );
 }
 
@@ -61,6 +99,7 @@ idMultiModelAF::Present
 */
 void idMultiModelAF::Present( void ) {
 	int i;
+	const bool newPresentationFrame = ( presentationTime != gameLocal.time );
 
 	// don't present to the renderer if the entity hasn't changed
 	if ( !( thinkFlags & TH_UPDATEVISUALS ) ) {
@@ -74,8 +113,26 @@ void idMultiModelAF::Present( void ) {
 			continue;
 		}
 
-		renderEntity.origin = physicsObj.GetOrigin( i );
-		renderEntity.axis = physicsObj.GetAxis( i );
+		const idVec3 modelOrigin = physicsObj.GetOrigin( i );
+		const idMat3 modelAxis = physicsObj.GetAxis( i );
+
+		if ( presentationTime < 0 ) {
+			presentationPrevOrigins[i] = modelOrigin;
+			presentationCurOrigins[i] = modelOrigin;
+			presentationPrevAxes[i] = modelAxis;
+			presentationCurAxes[i] = modelAxis;
+		} else if ( newPresentationFrame ) {
+			presentationPrevOrigins[i] = presentationCurOrigins[i];
+			presentationCurOrigins[i] = modelOrigin;
+			presentationPrevAxes[i] = presentationCurAxes[i];
+			presentationCurAxes[i] = modelAxis;
+		} else {
+			presentationCurOrigins[i] = modelOrigin;
+			presentationCurAxes[i] = modelAxis;
+		}
+
+		renderEntity.origin = modelOrigin;
+		renderEntity.axis = modelAxis;
 		renderEntity.hModel = modelHandles[i];
 		renderEntity.bodyId = i;
 
@@ -85,6 +142,36 @@ void idMultiModelAF::Present( void ) {
 		} else {
 			gameRenderWorld->UpdateEntityDef( modelDefHandles[i], &renderEntity );
 		}
+	}
+
+	presentationTime = gameLocal.time;
+}
+
+/*
+================
+idMultiModelAF::UpdatePresentationNonModelVisuals
+================
+*/
+void idMultiModelAF::UpdatePresentationNonModelVisuals( void ) {
+	idEntity::UpdatePresentationNonModelVisuals();
+
+	if ( gameLocal.isNewFrame || presentationTime < 0 ) {
+		return;
+	}
+
+	const float fraction = AFEntity_GetPresentationInterpolationFraction();
+
+	for ( int i = 0; i < modelHandles.Num(); i++ ) {
+		if ( !modelHandles[i] || modelDefHandles[i] == -1 ) {
+			continue;
+		}
+
+		renderEntity_t presentationRenderEntity = renderEntity;
+		presentationRenderEntity.origin = presentationPrevOrigins[i] + ( presentationCurOrigins[i] - presentationPrevOrigins[i] ) * fraction;
+		presentationRenderEntity.axis = AFEntity_InterpolateAxis( presentationPrevAxes[i], presentationCurAxes[i], fraction );
+		presentationRenderEntity.hModel = modelHandles[i];
+		presentationRenderEntity.bodyId = i;
+		gameRenderWorld->UpdateEntityDef( modelDefHandles[i], &presentationRenderEntity );
 	}
 }
 
@@ -1506,6 +1593,24 @@ void idAFEntity_Gibbable::Present( void ) {
 
 /*
 ================
+idAFEntity_Gibbable::UpdatePresentationNonModelVisuals
+================
+*/
+void idAFEntity_Gibbable::UpdatePresentationNonModelVisuals( void ) {
+	idEntity::UpdatePresentationNonModelVisuals();
+
+	if ( gameLocal.isNewFrame || skeletonModelDefHandle == -1 || !gibbed || IsHidden() || skeletonModel == NULL ) {
+		return;
+	}
+
+	renderEntity_t presentationSkeleton = renderEntity;
+	GetPresentationTransform( presentationSkeleton.origin, presentationSkeleton.axis );
+	presentationSkeleton.hModel = skeletonModel;
+	gameRenderWorld->UpdateEntityDef( skeletonModelDefHandle, &presentationSkeleton );
+}
+
+/*
+================
 idAFEntity_Gibbable::Damage
 ================
 */
@@ -2564,6 +2669,11 @@ idAFEntity_SteamPipe::idAFEntity_SteamPipe( void ) {
 	steamForce			= 0.0f;
 	steamUpForce		= 0.0f;
 	steamModelDefHandle	= -1;
+	steamPresentationTime = -1;
+	steamPrevOrigin = vec3_zero;
+	steamPrevAxis = mat3_identity;
+	steamCurOrigin = vec3_zero;
+	steamCurAxis = mat3_identity;
 	memset( &steamRenderEntity, 0, sizeof( steamRenderEntity ) );
 }
 
@@ -2621,6 +2731,7 @@ void idAFEntity_SteamPipe::Spawn( void ) {
 	force.SetForce( steamDir * -steamForce );
 
 	InitSteamRenderEntity();
+	steamPresentationTime = -1;
 
 	BecomeActive( TH_THINK );
 }
@@ -2659,6 +2770,11 @@ void idAFEntity_SteamPipe::InitSteamRenderEntity( void ) {
 		}
 		steamRenderEntity.origin = af.GetPhysics()->GetOrigin( steamBody );
 		steamRenderEntity.axis = af.GetPhysics()->GetAxis( steamBody );
+		steamPresentationTime = gameLocal.time;
+		steamPrevOrigin = steamRenderEntity.origin;
+		steamPrevAxis = steamRenderEntity.axis;
+		steamCurOrigin = steamRenderEntity.origin;
+		steamCurAxis = steamRenderEntity.axis;
 		steamModelDefHandle = gameRenderWorld->AddEntityDef( &steamRenderEntity );
 	}
 }
@@ -2683,10 +2799,47 @@ void idAFEntity_SteamPipe::Think( void ) {
 	if ( steamModelDefHandle >= 0 ){
 		steamRenderEntity.origin = af.GetPhysics()->GetOrigin( steamBody );
 		steamRenderEntity.axis = af.GetPhysics()->GetAxis( steamBody );
+		if ( steamPresentationTime < 0 ) {
+			steamPresentationTime = gameLocal.time;
+			steamPrevOrigin = steamRenderEntity.origin;
+			steamPrevAxis = steamRenderEntity.axis;
+			steamCurOrigin = steamRenderEntity.origin;
+			steamCurAxis = steamRenderEntity.axis;
+		} else {
+			if ( steamPresentationTime != gameLocal.time ) {
+				steamPrevOrigin = steamCurOrigin;
+				steamPrevAxis = steamCurAxis;
+				steamPresentationTime = gameLocal.time;
+			}
+			steamCurOrigin = steamRenderEntity.origin;
+			steamCurAxis = steamRenderEntity.axis;
+		}
 		gameRenderWorld->UpdateEntityDef( steamModelDefHandle, &steamRenderEntity );
 	}
 
 	idAFEntity_Base::Think();
+}
+
+/*
+================
+idAFEntity_SteamPipe::UpdatePresentationNonModelVisuals
+================
+*/
+void idAFEntity_SteamPipe::UpdatePresentationNonModelVisuals( void ) {
+	idEntity::UpdatePresentationNonModelVisuals();
+
+	if ( gameLocal.isNewFrame || steamModelDefHandle < 0 || IsHidden() ) {
+		return;
+	}
+
+	renderEntity_t presentationSteam = steamRenderEntity;
+	if ( steamPresentationTime >= 0 ) {
+		const float fraction = AFEntity_GetPresentationInterpolationFraction();
+		presentationSteam.origin.Lerp( steamPrevOrigin, steamCurOrigin, fraction );
+		presentationSteam.axis = AFEntity_InterpolateAxis( steamPrevAxis, steamCurAxis, fraction );
+	}
+
+	gameRenderWorld->UpdateEntityDef( steamModelDefHandle, &presentationSteam );
 }
 
 

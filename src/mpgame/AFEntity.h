@@ -24,6 +24,7 @@ public:
 
 	virtual void			Think( void );
 	virtual void			Present( void );
+	virtual void			UpdatePresentationNonModelVisuals( void );
 
 protected:
 	idPhysics_AF			physicsObj;
@@ -33,6 +34,11 @@ protected:
 private:
 	idList<idRenderModel *>	modelHandles;
 	idList<int>				modelDefHandles;
+	int						presentationTime;
+	idList<idVec3>			presentationPrevOrigins;
+	idList<idVec3>			presentationCurOrigins;
+	idList<idMat3>			presentationPrevAxes;
+	idList<idMat3>			presentationCurAxes;
 };
 
 
@@ -258,6 +264,7 @@ public:
 	void					Save( idSaveGame *savefile ) const;
 	void					Restore( idRestoreGame *savefile );
 	virtual void			Present( void );
+	virtual void			UpdatePresentationNonModelVisuals( void );
 	virtual	void			Damage( idEntity *inflictor, idEntity *attacker, const idVec3 &dir, const char *damageDefName, const float damageScale, const int location );
 	virtual void			SpawnGibs( const idVec3 &dir, const char *damageDefName );
 
@@ -445,6 +452,7 @@ public:
 	void					Restore( idRestoreGame *savefile );
 
 	virtual void			Think( void );
+	virtual void			UpdatePresentationNonModelVisuals( void );
 
 private:
 	int						steamBody;
@@ -453,6 +461,11 @@ private:
 	idForce_Constant		force;
 	renderEntity_t			steamRenderEntity;
 	qhandle_t				steamModelDefHandle;
+	int						steamPresentationTime;
+	idVec3					steamPrevOrigin;
+	idMat3					steamPrevAxis;
+	idVec3					steamCurOrigin;
+	idMat3					steamCurAxis;
 
 	void					InitSteamRenderEntity( void );
 };

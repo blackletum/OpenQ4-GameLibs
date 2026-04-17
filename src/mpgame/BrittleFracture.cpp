@@ -22,6 +22,42 @@ const int SHARD_FADE_START	= 2000;
 
 static const char *brittleFracture_SnapshotName = "_BrittleFracture_Snapshot_";
 
+namespace {
+ID_INLINE float BrittleFracture_GetPresentationInterpolationFraction( void ) {
+	if ( gameLocal.GetDemoState() == DEMO_PLAYING || gameLocal.IsTimeDemo() ) {
+		return 1.0f;
+	}
+
+	const float ticMsec = common->GetUserCmdMsecFloat();
+	if ( ticMsec <= 0.0f ) {
+		return 1.0f;
+	}
+
+	return idMath::ClampFloat( 0.0f, 1.0f,
+		static_cast<float>( Sys_Milliseconds() - gameLocal.GetTime() ) / ticMsec );
+}
+
+ID_INLINE idMat3 BrittleFracture_InterpolateAxis( const idMat3 &from, const idMat3 &to, float fraction ) {
+	if ( fraction <= 0.0f ) {
+		return from;
+	}
+	if ( fraction >= 1.0f ) {
+		return to;
+	}
+
+	idQuat blended;
+	blended.Slerp( from.ToQuat(), to.ToQuat(), fraction );
+	return blended.ToMat3();
+}
+
+ID_INLINE void BrittleFracture_ResetShardPresentation( shard_t *shard, const idVec3 &origin, const idMat3 &axis ) {
+	shard->presentationPrevOrigin = origin;
+	shard->presentationCurOrigin = origin;
+	shard->presentationPrevAxis = axis;
+	shard->presentationCurAxis = axis;
+}
+}
+
 /*
 ================
 idBrittleFracture::idBrittleFracture
@@ -45,7 +81,11 @@ idBrittleFracture::idBrittleFracture( void ) {
 	bounds.Clear();
 	disableFracture = false;
 
+	presentationTime = -1;
+	presentationRenderSerial = 0;
+	presentationNeedsInterpolatedRefresh = false;
 	lastRenderEntityUpdate = -1;
+	lastRenderEntityUpdateSerial = -1;
 	changed = false;
 
 	fl.networkSync = true;
@@ -231,7 +271,19 @@ void idBrittleFracture::Restore( idRestoreGame *savefile ) {
 		} else {
 			shards[i]->clipModel = shards[i]->physicsObj.GetClipModel();
 		}
+
+		const idVec3 shardOrigin = ( shards[i]->clipModel != NULL ) ? shards[i]->clipModel->GetOrigin() : vec3_origin;
+		const idMat3 shardAxis = ( shards[i]->clipModel != NULL ) ? shards[i]->clipModel->GetAxis() : mat3_identity;
+		BrittleFracture_ResetShardPresentation( shards[i], shardOrigin, shardAxis );
 	}
+
+	// Rebuild the callback model and transient high-refresh presentation state after load.
+	presentationTime = -1;
+	presentationRenderSerial = 0;
+	presentationNeedsInterpolatedRefresh = false;
+	lastRenderEntityUpdate = -1;
+	lastRenderEntityUpdateSerial = -1;
+	changed = true;
 }
 
 /*
@@ -303,6 +355,7 @@ void idBrittleFracture::AddShard( idClipModel *clipModel, idFixedWinding &w ) {
 	shard->edgeHasNeighbour.AssureSize( w.GetNumPoints(), false );
 	shard->neighbours.Clear();
 	shard->atEdge = false;
+	BrittleFracture_ResetShardPresentation( shard, clipModel->GetOrigin(), clipModel->GetAxis() );
 	shards.Append( shard );
 }
 
@@ -337,6 +390,9 @@ bool idBrittleFracture::UpdateRenderEntity( renderEntity_s *renderEntity, const 
 	idDrawVert *v;
 	idPlane plane;
 	idMat3 tangents;
+	const int currentRenderSerial = presentationRenderSerial;
+	const bool useInterpolatedTransforms = !gameLocal.isNewFrame && presentationNeedsInterpolatedRefresh && presentationTime >= 0;
+	const float interpolationFraction = useInterpolatedTransforms ? BrittleFracture_GetPresentationInterpolationFraction() : 1.0f;
 
 	// this may be triggered by a model trace or other non-view related source,
 	// to which we should look like an empty model
@@ -345,11 +401,12 @@ bool idBrittleFracture::UpdateRenderEntity( renderEntity_s *renderEntity, const 
 	}
 
 	// don't regenerate it if it is current
-	if ( lastRenderEntityUpdate == gameLocal.time || !changed ) {
+	if ( ( lastRenderEntityUpdate == gameLocal.time && lastRenderEntityUpdateSerial == currentRenderSerial ) || !changed ) {
 		return false;
 	}
 
 	lastRenderEntityUpdate = gameLocal.time;
+	lastRenderEntityUpdateSerial = currentRenderSerial;
 	changed = false;
 
 	numTris = 0;
@@ -379,8 +436,19 @@ bool idBrittleFracture::UpdateRenderEntity( renderEntity_s *renderEntity, const 
 	}
 
 	for ( i = 0; i < shards.Num(); i++ ) {
-		const idVec3 &origin = shards[i]->clipModel->GetOrigin();
-		const idMat3 &axis = shards[i]->clipModel->GetAxis();
+		idVec3 origin;
+		idMat3 axis;
+
+		if ( useInterpolatedTransforms ) {
+			origin.Lerp( shards[i]->presentationPrevOrigin, shards[i]->presentationCurOrigin, interpolationFraction );
+			axis = BrittleFracture_InterpolateAxis( shards[i]->presentationPrevAxis, shards[i]->presentationCurAxis, interpolationFraction );
+		} else if ( presentationTime >= 0 ) {
+			origin = shards[i]->presentationCurOrigin;
+			axis = shards[i]->presentationCurAxis;
+		} else {
+			origin = shards[i]->clipModel->GetOrigin();
+			axis = shards[i]->clipModel->GetAxis();
+		}
 
 		fade = 1.0f;
 		if ( shards[i]->droppedTime >= 0 ) {
@@ -537,6 +605,42 @@ bool idBrittleFracture::ModelCallback( renderEntity_s *renderEntity, const rende
 
 /*
 ================
+idBrittleFracture::UpdateShardPresentationState
+================
+*/
+void idBrittleFracture::UpdateShardPresentationState( void ) {
+	const bool newPresentationFrame = ( presentationTime != gameLocal.time );
+	bool hasPresentationDelta = false;
+
+	for ( int i = 0; i < shards.Num(); i++ ) {
+		const idVec3 shardOrigin = shards[i]->clipModel->GetOrigin();
+		const idMat3 shardAxis = shards[i]->clipModel->GetAxis();
+
+		if ( presentationTime < 0 ) {
+			BrittleFracture_ResetShardPresentation( shards[i], shardOrigin, shardAxis );
+		} else if ( newPresentationFrame ) {
+			shards[i]->presentationPrevOrigin = shards[i]->presentationCurOrigin;
+			shards[i]->presentationCurOrigin = shardOrigin;
+			shards[i]->presentationPrevAxis = shards[i]->presentationCurAxis;
+			shards[i]->presentationCurAxis = shardAxis;
+		} else {
+			shards[i]->presentationCurOrigin = shardOrigin;
+			shards[i]->presentationCurAxis = shardAxis;
+		}
+
+		if ( shards[i]->droppedTime != -1 &&
+			 ( !shards[i]->presentationPrevOrigin.Compare( shards[i]->presentationCurOrigin, 0.01f ) ||
+			   !shards[i]->presentationPrevAxis.Compare( shards[i]->presentationCurAxis, 0.001f ) ) ) {
+			hasPresentationDelta = true;
+		}
+	}
+
+	presentationTime = gameLocal.time;
+	presentationNeedsInterpolatedRefresh = hasPresentationDelta;
+}
+
+/*
+================
 idBrittleFracture::Present
 ================
 */
@@ -548,12 +652,15 @@ void idBrittleFracture::Present() {
 	}
 	BecomeInactive( TH_UPDATEVISUALS );
 
+	UpdateShardPresentationState();
+
 	renderEntity.bounds = bounds;
 	renderEntity.origin.Zero();
 	renderEntity.axis.Identity();
 
 	// force an update because the bounds/origin/axis may stay the same while the model changes
 	renderEntity.forceUpdate = true;
+	changed = true;
 
 	// add to refresh list
 	if ( modelDefHandle == -1 ) {
@@ -561,8 +668,23 @@ void idBrittleFracture::Present() {
 	} else {
 		gameRenderWorld->UpdateEntityDef( modelDefHandle, &renderEntity );
 	}
+}
 
+/*
+================
+idBrittleFracture::UpdatePresentationNonModelVisuals
+================
+*/
+void idBrittleFracture::UpdatePresentationNonModelVisuals( void ) {
+	idEntity::UpdatePresentationNonModelVisuals();
+
+	if ( gameLocal.isNewFrame || modelDefHandle == -1 || !presentationNeedsInterpolatedRefresh ) {
+		return;
+	}
+
+	++presentationRenderSerial;
 	changed = true;
+	gameRenderWorld->UpdateEntityDef( modelDefHandle, &renderEntity );
 }
 
 /*
@@ -627,7 +749,9 @@ void idBrittleFracture::Think( void ) {
 		}
 	}
 
-	if ( fading ) {
+	UpdateShardPresentationState();
+
+	if ( fading || presentationNeedsInterpolatedRefresh ) {
 		BecomeActive( TH_UPDATEVISUALS | TH_THINK );
 	} else {
 		BecomeInactive( TH_THINK );

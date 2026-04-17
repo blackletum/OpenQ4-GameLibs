@@ -386,14 +386,16 @@ void rvViewWeapon::UpdatePresentationWeapon( bool showViewModel ) {
 	weapon->UpdatePresentationLights( true );
 	weapon->UpdatePresentation();
 
-	if ( !gameLocal.isNewFrame ) {
-		for ( rvClientEntity* cent = clientEntities.Next(); cent != NULL; cent = cent->bindNode.Next() ) {
-			if ( !cent->IsType( rvClientEffect::GetClassType() ) ) {
-				continue;
-			}
-
-			static_cast<rvClientEffect *>( cent )->UpdatePresentationEffect();
+	// View-weapon child FX can be spawned from the simulation-frame weapon think,
+	// but the final first-person render pose is only resolved here in the draw
+	// path. Refresh them on both new and repeated frames so muzzle flashes and
+	// related firing FX follow the corrected presentation-space gun immediately.
+	for ( rvClientEntity* cent = clientEntities.Next(); cent != NULL; cent = cent->bindNode.Next() ) {
+		if ( !cent->IsType( rvClientEffect::GetClassType() ) ) {
+			continue;
 		}
+
+		static_cast<rvClientEffect *>( cent )->UpdatePresentationEffect();
 	}
 
 	if ( showViewModel && !( weapon->wsfl.zoom && weapon->GetZoomGui() ) ) {

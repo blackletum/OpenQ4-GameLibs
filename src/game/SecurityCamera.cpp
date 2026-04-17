@@ -252,10 +252,14 @@ idSecurityCamera::GetRenderView
 */
 renderView_t *idSecurityCamera::GetRenderView() {
 	renderView_t *rv = idEntity::GetRenderView();
+	idVec3 presentationOrigin;
+	idMat3 presentationAxis;
+	GetPresentationTransformForView( presentationOrigin, presentationAxis );
+	const idVec3 presentationViewAxis = ( flipAxis ) ? -presentationAxis[ modelAxis ] : presentationAxis[ modelAxis ];
 	rv->fov_x = scanFov;
 	rv->fov_y = scanFov;
-	rv->viewaxis = GetAxis().ToAngles().ToMat3();
-	rv->vieworg = GetPhysics()->GetOrigin() + viewOffset;
+	rv->viewaxis = presentationViewAxis.ToAngles().ToMat3();
+	rv->vieworg = presentationOrigin + viewOffset;
 	return rv;
 }
 
@@ -553,6 +557,11 @@ Present is called to allow entities to generate refEntities, lights, etc for the
 ================
 */
 void idSecurityCamera::Present( void ) {
+	if ( !gameLocal.isNewFrame ) {
+		UpdatePresentationTransformToRenderWorld();
+		return;
+	}
+
 	// don't present to the renderer if the entity hasn't changed
 	if ( !( thinkFlags & TH_UPDATEVISUALS ) ) {
 		return;
