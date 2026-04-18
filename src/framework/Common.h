@@ -206,19 +206,21 @@ public:
 
 	virtual int					GetUserCmdMSec( void ) const = 0;
 
-	int GetUserCmdMsecNumerator( void ) const { return 1000; }
-	int GetUserCmdMsecDenominator( void ) const { return GetUserCmdHz(); }
-	float GetUserCmdMsecFloat( void ) const { return static_cast<float>( GetUserCmdMsecNumerator() ) / static_cast<float>( GetUserCmdMsecDenominator() ); }
-	float GetUserCmdSec( void ) const { return 1.0f / static_cast<float>( GetUserCmdHz() ); }
-	int GetUserCmdTime( int ticNumber ) const {
+	virtual int					GetUserCmdTime( int ticNumber ) const {
 		if ( ticNumber <= 0 ) {
 			return 0;
 		}
 		return static_cast<int>( ( static_cast<long long>( ticNumber ) * GetUserCmdMsecNumerator() ) / GetUserCmdMsecDenominator() );
 	}
-	int GetUserCmdDeltaMsec( int ticNumber ) const {
+
+	virtual int					GetUserCmdDeltaMsec( int ticNumber ) const {
 		return GetUserCmdTime( ticNumber ) - GetUserCmdTime( ticNumber - 1 );
 	}
+
+	int GetUserCmdMsecNumerator( void ) const { return 1000; }
+	int GetUserCmdMsecDenominator( void ) const { return GetUserCmdHz(); }
+	float GetUserCmdMsecFloat( void ) const { return static_cast<float>( GetUserCmdMsecNumerator() ) / static_cast<float>( GetUserCmdMsecDenominator() ); }
+	float GetUserCmdSec( void ) const { return 1.0f / static_cast<float>( GetUserCmdHz() ); }
 	int GetUserCmdTicsForMsecFloor( int msec ) const {
 		if ( msec <= 0 ) {
 			return 0;
