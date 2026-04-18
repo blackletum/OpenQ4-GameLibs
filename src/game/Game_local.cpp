@@ -7852,6 +7852,28 @@ int idGameLocal::GetSpawnId( const idEntity* ent ) const {
 
 /*
 ================
+idGameLocal::GetPresentationTimeMsec
+================
+*/
+int idGameLocal::GetPresentationTimeMsec() const {
+	if ( GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
+		return time;
+	}
+
+	static int lastFrameNum = -1;
+	static int presentationOffsetMsec = 0;
+
+	const int realTimeMsec = Sys_Milliseconds();
+	if ( framenum != lastFrameNum ) {
+		presentationOffsetMsec = realTimeMsec - time;
+		lastFrameNum = framenum;
+	}
+
+	return realTimeMsec - presentationOffsetMsec;
+}
+
+/*
+================
 idGameLocal::ThrottleUserInfo
 ================
 */

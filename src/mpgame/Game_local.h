@@ -743,6 +743,7 @@ public:
 	int						GetPreviousTime() const { return previousTime; }
 // RAVEN END
 	int						GetSpawnId( const idEntity *ent ) const;
+	int						GetPresentationTimeMsec() const;
 
 	const idDeclEntityDef *	FindEntityDef( const char *name, bool makeDefault = true ) const;
 	const idDict *			FindEntityDefDict( const char *name, bool makeDefault = true ) const;

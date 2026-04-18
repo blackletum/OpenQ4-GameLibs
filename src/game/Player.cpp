@@ -33,7 +33,7 @@ idCVar net_showPredictionError( "net_showPredictionError", "-1", CVAR_INTEGER | 
 idCVar pm_presentViewBias( "pm_presentViewBias", "0", CVAR_FLOAT | CVAR_GAME | CVAR_ARCHIVE, "bias first-person presentation interpolation toward the latest simulation snapshot to reduce one-tic high-refresh view lag", 0.0f, 1.0f );
 
 static int Player_GetPresentationTime( void ) {
-	return Sys_Milliseconds();
+	return gameLocal.GetPresentationTimeMsec();
 }
 
 static float Player_GetPresentationInterpolationFraction( void ) {
@@ -71,6 +71,14 @@ static idMat3 Player_InterpolateAxis( const idMat3 &from, const idMat3 &to, floa
 	idQuat blended;
 	blended.Slerp( from.ToQuat(), to.ToQuat(), fraction );
 	return blended.ToMat3();
+}
+
+static idEntity *Player_GetRootBoundEntity( idEntity *ent ) {
+	while ( ent != NULL && ent->GetBindMaster() != NULL ) {
+		ent = ent->GetBindMaster();
+	}
+
+	return ent;
 }
 
 
@@ -8420,6 +8428,15 @@ void idPlayer::BobCycle( const idVec3 &pushVelocity ) {
 	gravityDir = physicsObj.GetGravityNormal();
 	vel = velocity - ( velocity * gravityDir ) * gravityDir;
 	xyspeed = vel.LengthFast();
+
+	idEntity *groundEnt = physicsObj.GetGroundEntity();
+	idEntity *groundRoot = Player_GetRootBoundEntity( groundEnt );
+	const float stepAmount = physicsObj.GetStepUp();
+	const bool suppressMoverStepSmoothing =
+		physicsObj.HasGroundContacts() &&
+		groundRoot != NULL &&
+		groundRoot->IsType( idMover::GetClassType() ) &&
+		idMath::Fabs( stepAmount ) <= pm_stepsize.GetFloat();
 	
 	if ( !physicsObj.HasGroundContacts() || influenceActive == INFLUENCE_LEVEL2 || ( gameLocal.isMultiplayer && spectating ) ) {
 		// airborne
@@ -8489,18 +8506,26 @@ void idPlayer::BobCycle( const idVec3 &pushVelocity ) {
 	viewBob.Zero();
 
 	if ( physicsObj.HasSteppedUp() ) {
-
-		// check for stepping up before a previous step is completed
-		deltaTime = gameLocal.time - stepUpTime;
-		if ( deltaTime < STEPUP_TIME ) {
-			stepUpDelta = stepUpDelta * ( STEPUP_TIME - deltaTime ) / STEPUP_TIME + physicsObj.GetStepUp();
+		// Moving lift assemblies often place the player on a bound clip helper one
+		// tic and the mover body itself on the next. Those support changes are not
+		// real stairs, so suppress stair-bob smoothing on mover-backed steps to
+		// keep the high-refresh first-person view stable.
+		if ( suppressMoverStepSmoothing ) {
+			stepUpDelta = 0.0f;
 		} else {
-			stepUpDelta = physicsObj.GetStepUp();
+
+			// check for stepping up before a previous step is completed
+			deltaTime = gameLocal.time - stepUpTime;
+			if ( deltaTime < STEPUP_TIME ) {
+				stepUpDelta = stepUpDelta * ( STEPUP_TIME - deltaTime ) / STEPUP_TIME + stepAmount;
+			} else {
+				stepUpDelta = stepAmount;
+			}
+			if ( stepUpDelta > 2.0f * pm_stepsize.GetFloat() ) {
+				stepUpDelta = 2.0f * pm_stepsize.GetFloat();
+			}
+			stepUpTime = gameLocal.time;
 		}
-		if ( stepUpDelta > 2.0f * pm_stepsize.GetFloat() ) {
-			stepUpDelta = 2.0f * pm_stepsize.GetFloat();
-		}
-		stepUpTime = gameLocal.time;
 	}
 
 	idVec3 gravity = physicsObj.GetGravityNormal();
@@ -12594,7 +12619,7 @@ void idPlayer::CalculateRenderView( void ) {
 	}
 	gameLocal.ApplySpecialEffectsToRenderView( renderView );
 	renderView->globalMaterial = gameLocal.GetGlobalMaterial();
-	renderView->time = cameraViewActive ? presentationTime : gameLocal.time;
+	renderView->time = ( gameLocal.GetDemoState() != DEMO_NONE || gameLocal.IsTimeDemo() ) ? gameLocal.time : presentationTime;
 
 	// calculate size of 3D view
 	renderView->x = 0;

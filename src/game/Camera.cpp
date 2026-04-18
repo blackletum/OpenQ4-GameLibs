@@ -13,7 +13,7 @@ ID_INLINE int GameLocal_PreviousFrameTime() {
 }
 
 ID_INLINE int GameLocal_PresentationTime() {
-	return Sys_Milliseconds();
+	return gameLocal.GetPresentationTimeMsec();
 }
 
 ID_INLINE float GameLocal_GetPresentationInterpolationFraction() {
@@ -1852,7 +1852,7 @@ void idCameraAnim::Start( void ) {
 	// if the player has already created the renderview for this frame, have him update it again so that the camera starts this frame
 // RAVEN BEGIN
 // mekberg: make sure render view is valid.
-	if ( gameLocal.GetLocalPlayer( )->GetRenderView( ) && gameLocal.GetLocalPlayer()->GetRenderView()->time == gameLocal.time ) {
+	if ( gameLocal.GetLocalPlayer( )->GetRenderView( ) && gameLocal.GetLocalPlayer()->GetRenderView()->time >= gameLocal.time ) {
 // RAVEN END
 		gameLocal.GetLocalPlayer()->CalculateRenderView();
 	}

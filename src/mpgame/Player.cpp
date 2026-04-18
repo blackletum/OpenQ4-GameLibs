@@ -33,7 +33,7 @@ idCVar net_showPredictionError( "net_showPredictionError", "-1", CVAR_INTEGER | 
 idCVar pm_presentViewBias( "pm_presentViewBias", "0", CVAR_FLOAT | CVAR_GAME | CVAR_ARCHIVE, "bias first-person presentation interpolation toward the latest simulation snapshot to reduce one-tic high-refresh view lag", 0.0f, 1.0f );
 
 static int Player_GetPresentationTime( void ) {
-	return Sys_Milliseconds();
+	return gameLocal.GetPresentationTimeMsec();
 }
 
 static float Player_GetPresentationInterpolationFraction( void ) {
@@ -7934,19 +7934,33 @@ void idPlayer::BobCycle( const idVec3 &pushVelocity ) {
 	// calculate position for view bobbing
 	viewBob.Zero();
 
-	if ( physicsObj.HasSteppedUp() ) {
+	const float stepAmount = physicsObj.GetStepUp();
+	const bool suppressMoverStepSmoothing =
+		stepAmount < -0.25f &&
+		( pushVelocity * gravityDir ) > 0.25f &&
+		physicsObj.HasGroundContacts();
 
-		// check for stepping up before a previous step is completed
-		deltaTime = gameLocal.time - stepUpTime;
-		if ( deltaTime < STEPUP_TIME ) {
-			stepUpDelta = stepUpDelta * ( STEPUP_TIME - deltaTime ) / STEPUP_TIME + physicsObj.GetStepUp();
+	if ( physicsObj.HasSteppedUp() ) {
+		// Descending movers can look like a stream of tiny step-down events while
+		// the player walks across them. Suppress stair-bob smoothing for that
+		// case so the camera stays aligned with the interpolated mover instead of
+		// vibrating against it.
+		if ( suppressMoverStepSmoothing ) {
+			stepUpDelta = 0.0f;
 		} else {
-			stepUpDelta = physicsObj.GetStepUp();
+
+			// check for stepping up before a previous step is completed
+			deltaTime = gameLocal.time - stepUpTime;
+			if ( deltaTime < STEPUP_TIME ) {
+				stepUpDelta = stepUpDelta * ( STEPUP_TIME - deltaTime ) / STEPUP_TIME + stepAmount;
+			} else {
+				stepUpDelta = stepAmount;
+			}
+			if ( stepUpDelta > 2.0f * pm_stepsize.GetFloat() ) {
+				stepUpDelta = 2.0f * pm_stepsize.GetFloat();
+			}
+			stepUpTime = gameLocal.time;
 		}
-		if ( stepUpDelta > 2.0f * pm_stepsize.GetFloat() ) {
-			stepUpDelta = 2.0f * pm_stepsize.GetFloat();
-		}
-		stepUpTime = gameLocal.time;
 	}
 
 	idVec3 gravity = physicsObj.GetGravityNormal();
@@ -11477,7 +11491,7 @@ void idPlayer::CalculateRenderView( void ) {
 		renderView->shaderParms[ i ] = gameLocal.globalShaderParms[ i ];
 	}
 	renderView->globalMaterial = gameLocal.GetGlobalMaterial();
-	renderView->time = cameraViewActive ? presentationTime : gameLocal.time;
+	renderView->time = ( gameLocal.GetDemoState() != DEMO_NONE || gameLocal.IsTimeDemo() ) ? gameLocal.time : presentationTime;
 
 	// calculate size of 3D view
 	renderView->x = 0;

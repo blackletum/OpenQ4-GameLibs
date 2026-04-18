@@ -19,7 +19,7 @@
 */
 
 static int Entity_GetPresentationTime( void ) {
-	return Sys_Milliseconds();
+	return gameLocal.GetPresentationTimeMsec();
 }
 
 static float Entity_GetPresentationInterpolationFraction( void ) {
@@ -1865,7 +1865,7 @@ renderView_t *idEntity::GetRenderView( void ) {
 
 	renderView->globalMaterial = gameLocal.GetGlobalMaterial();
 
-	renderView->time = gameLocal.time;
+	renderView->time = ( gameLocal.GetDemoState() != DEMO_NONE || gameLocal.IsTimeDemo() ) ? gameLocal.time : Entity_GetPresentationTime();
 
 	return renderView;
 }
