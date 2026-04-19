@@ -48,3 +48,4 @@ src/UpgradeLog.htm
 src/*.vcxproj
 src/*.vcxproj.filters
 src/*.vcxproj.user
+.voice_eng/
