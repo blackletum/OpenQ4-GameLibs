@@ -1954,26 +1954,24 @@ Cmd_CollisionModelInfo_f
 ==================
 */
 static void Cmd_CollisionModelInfo_f( const idCmdArgs &args ) {
-// jmarshall - extra debug.
-	//const char *value;
-	//
-	//if ( !gameLocal.CheatsOk() ) {
-	//	return;
-	//}
-	//
-	//if ( args.Argc () < 2 ) {
-	//	gameLocal.Printf( "usage: collisionModelInfo <modelNum>\n"
-	//				"use 'all' instead of the model number for accumulated info\n" );
-	//	return;
-	//}
-	//
-	//value = args.Argv( 1 );
-	//if ( !idStr::Icmp( value, "all" ) ) {
-	//	collisionModelManager->ModelInfo( -1 );
-	//} else {
-	//	collisionModelManager->ModelInfo( atoi(value) );
-	//}
-// jmarshall end
+	const char *value;
+
+	if ( !gameLocal.CheatsOk() ) {
+		return;
+	}
+
+	if ( args.Argc () < 2 ) {
+		gameLocal.Printf( "usage: collisionModelInfo <modelNum>\n"
+					"use 'all' instead of the model number for accumulated info\n" );
+		return;
+	}
+
+	value = args.Argv( 1 );
+	if ( !idStr::Icmp( value, "all" ) ) {
+		collisionModelManager->ModelInfo( -1 );
+	} else {
+		collisionModelManager->ModelInfo( atoi(value) );
+	}
 }
 
 /*
