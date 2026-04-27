@@ -511,9 +511,7 @@ void idGameLocal::Init( void ) {
 // RAVEN END
 	// register game specific decl types
 	declManager->RegisterDeclType( "model",				DECL_MODELDEF,		idDeclAllocator<idDeclModelDef> );
-	if ( declManager->GetDeclTypeFromName( "export" ) == DECL_MAX_TYPES ) {
-		declManager->RegisterDeclType( "export",		DECL_MODELEXPORT,	idDeclAllocator<idDecl> );
-	}
+	declManager->RegisterDeclType( "export",			DECL_MODELEXPORT,	idDeclAllocator<idDecl> );
 
 // RAVEN BEGIN
 // rjohnson: camera is now contained in a def for frame commands
@@ -522,11 +520,11 @@ void idGameLocal::Init( void ) {
 	// register game specific decl folders
 // RAVEN BEGIN
 #ifndef RV_SINGLE_DECL_FILE
-	declManager->RegisterDeclFolder( "def",			".def",			DECL_ENTITYDEF );
+	declManager->RegisterDeclFolderWrapper( "def",			".def",			DECL_ENTITYDEF );
 // bdube: not used in quake 4
 //	declManager->RegisterDeclFolder( "fx",					".fx",			DECL_FX );
 //	declManager->RegisterDeclFolder( "particles",			".prt",			DECL_PARTICLE );
-	declManager->RegisterDeclFolder( "af",			".af",			DECL_AF );
+	declManager->RegisterDeclFolderWrapper( "af",			".af",			DECL_AF );
 //	declManager->RegisterDeclFolderWrapper( "newpdas",		".pda",			DECL_PDA );
 #else
 	if(!cvarSystem->GetCVarBool("com_SingleDeclFile"))
@@ -1185,10 +1183,10 @@ void idGameLocal::Error( const char *fmt, ... ) const {
 
 // RAVEN BEGIN
 // scork: some model errors arrive here during validation which kills the whole process, so let's just warn about them instead...
-	//if ( common->DoingDeclValidation() ) {
-	//	this->Warning( "%s", text );
-	//	return;
-	//}
+	if ( common->DoingDeclValidation() ) {
+		this->Warning( "%s", text );
+		return;
+	}
 // RAVEN END
 
 	thread = idThread::CurrentThread();

@@ -19,10 +19,11 @@ public:
 
 	virtual size_t			Size( void ) const;
 	virtual const char *	DefaultDefinition( void ) const;
-	virtual bool			Parse( const char *text, const int textLength, bool noCaching );
-	virtual void			FreeData( void );
-	virtual void			Print( void ) const;
-	virtual void			List( void ) const;
+	virtual bool			Parse( const char *text, const int textLength ) override;
+	virtual bool			Parse( const char *text, const int textLength, bool noCaching ) override;
+	virtual void			FreeData( void ) override;
+	virtual void			Print( void ) const override;
+	virtual void			List( void ) const override;
 
 	const char *			GetFrom() const { return from; }
 	const char *			GetBody() const { return text; }
@@ -47,10 +48,11 @@ public:
 
 	virtual size_t			Size( void ) const;
 	virtual const char *	DefaultDefinition( void ) const;
-	virtual bool			Parse( const char *text, const int textLength, bool noCaching );
-	virtual void			FreeData( void );
-	virtual void			Print( void ) const;
-	virtual void			List( void ) const;
+	virtual bool			Parse( const char *text, const int textLength ) override;
+	virtual bool			Parse( const char *text, const int textLength, bool noCaching ) override;
+	virtual void			FreeData( void ) override;
+	virtual void			Print( void ) const override;
+	virtual void			List( void ) const override;
 
 	const char *			GetRoq() const { return video; }
 	const char *			GetWave() const { return audio; }
@@ -73,10 +75,11 @@ public:
 
 	virtual size_t			Size( void ) const;
 	virtual const char *	DefaultDefinition( void ) const;
-	virtual bool			Parse( const char *text, const int textLength, bool noCaching );
-	virtual void			FreeData( void );
-	virtual void			Print( void ) const;
-	virtual void			List( void ) const;
+	virtual bool			Parse( const char *text, const int textLength ) override;
+	virtual bool			Parse( const char *text, const int textLength, bool noCaching ) override;
+	virtual void			FreeData( void ) override;
+	virtual void			Print( void ) const override;
+	virtual void			List( void ) const override;
 
 	const char *			GetAudioName() const { return audioName; }
 	const char *			GetWave() const { return audio; }
@@ -97,10 +100,11 @@ public:
 
 	virtual size_t			Size( void ) const;
 	virtual const char *	DefaultDefinition( void ) const;
-	virtual bool			Parse( const char *text, const int textLength, bool noCaching );
-	virtual void			FreeData( void );
-	virtual void			Print( void ) const;
-	virtual void			List( void ) const;
+	virtual bool			Parse( const char *text, const int textLength ) override;
+	virtual bool			Parse( const char *text, const int textLength, bool noCaching ) override;
+	virtual void			FreeData( void ) override;
+	virtual void			Print( void ) const override;
+	virtual void			List( void ) const override;
 
 	virtual void			AddVideo( const char *name, bool unique = true ) const;
 	virtual void			AddAudio( const char *name, bool unique = true ) const;

@@ -239,6 +239,7 @@ public:
 							// The manager will have called FreeData() before issuing a Parse().
 							// The subclass can call MakeDefault() internally at any point if
 							// there are parse errors.
+	virtual bool			Parse( const char *text, const int textLength ) { return base->Parse( text, textLength, false ); }
 	virtual bool			Parse( const char *text, const int textLength, bool noCaching ) { return base->Parse( text, textLength, noCaching ); }
 
 							// Frees any pointers held by the subclass. This may be called before
@@ -274,6 +275,27 @@ public:
 public:
 	idDeclBase *			base;
 };
+
+ID_INLINE bool DeclManager_ValidateParsedDecl( const idDecl *decl, declType_t type, bool parsed ) {
+	// Doom 3 / Quake 4 skin parsing reports success through the defaulted state
+	// rather than a true return value.
+	if ( type == DECL_SKIN ) {
+		return decl == NULL || decl->GetState() != DS_DEFAULTED;
+	}
+
+	return parsed && ( decl == NULL || decl->GetState() != DS_DEFAULTED );
+}
+
+ID_INLINE void DeclManager_FreeAllocatedDecl( idDecl *decl ) {
+	if ( decl == NULL ) {
+		return;
+	}
+
+	idDeclBase *base = decl->base;
+	decl->base = NULL;
+	delete decl;
+	delete base;
+}
 
 
 template< class type >
@@ -343,6 +365,7 @@ public:
 							// Registers a new folder with decl files.
 	virtual void			RegisterDeclFolderWrapper( const char *folder, const char *extension, declType_t defaultType, bool unique = false, bool norecurse = false ) = 0;
 // RAVEN END
+	virtual void			RegisterDeclFolder( const char *folder, const char *extension, declType_t defaultType ) = 0;
 
 							// Returns a checksum for all loaded decl text.
 	virtual int				GetChecksum( void ) const = 0;
@@ -428,7 +451,7 @@ public:
 
 	virtual	idStr					GetNewName( declType_t type, const char *base ) = 0;
 	virtual	const char *			GetDeclTypeName( declType_t type ) = 0;
-	virtual size_t					ListDeclSummary( const idCmdArgs &args ) = 0; 
+	virtual size_t					ListDeclSummary( const idCmdArgs &args ) = 0;
 	virtual void					RemoveDeclFile( const char *file ) = 0;
 // scork: Validation call for detailed error-reporting
 	virtual bool					Validate( declType_t type, int iIndex, idStr &strReportTo ) = 0;

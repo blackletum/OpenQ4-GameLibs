@@ -3111,16 +3111,11 @@ idDeclModelDef::Validate
 =====================
 */
 bool idDeclModelDef::Validate( const char *psText, int iTextLength, idStr &strReportTo ) const {
-// jmarshall
-	//idDeclModelDef *pSelf = (idDeclModelDef*) declManager->AllocateDecl( DECL_MODELDEF );
-	//bool bOk = pSelf->Parse( psText, iTextLength, false );
-	//pSelf->FreeData();
-	//delete pSelf->base;
-	//delete pSelf;
-	//
-	//return bOk;
-	return true;
-// jmarshall end
+	idDeclModelDef *pSelf = (idDeclModelDef*) declManager->AllocateDecl( DECL_MODELDEF );
+	const bool bOk = DeclManager_ValidateParsedDecl( pSelf, DECL_MODELDEF, pSelf != NULL && pSelf->Parse( psText, iTextLength, false ) );
+	DeclManager_FreeAllocatedDecl( pSelf );
+
+	return bOk;
 }
 
 /*
@@ -4490,6 +4485,26 @@ bool idAnimator::GetBounds( int currentTime, idBounds &bounds ) {
 
 	if ( !modelDef || !modelDef->ModelHandle() ) {
 		return false;
+	}
+
+	// The legacy animation envelopes only track the skeleton plus a small head
+	// hack, which is too conservative for several retail player/body/weapon
+	// combinations and can produce stable square scissor clipping. Prefer the
+	// exact posed MD5 mesh bounds whenever the render model can provide them.
+	CreateFrame( currentTime, false );
+	if ( modelDef->ModelHandle()->BoundsFromJoints( joints, bounds ) ) {
+		if ( g_debugBounds.GetBool() ) {
+			if ( bounds[1][0] - bounds[0][0] > 2048 || bounds[1][1] - bounds[0][1] > 2048 ) {
+				if ( entity ) {
+					gameLocal.Warning( "big frameBounds on entity '%s' with model '%s': %f,%f", entity->name.c_str(), modelDef->ModelHandle()->Name(), bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1] );
+				} else {
+					gameLocal.Warning( "big frameBounds on model '%s': %f,%f", modelDef->ModelHandle()->Name(), bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1] );
+				}
+			}
+		}
+
+		frameBounds = bounds;
+		return true;
 	}
 
 	if ( AFPoseJoints.Num() ) {

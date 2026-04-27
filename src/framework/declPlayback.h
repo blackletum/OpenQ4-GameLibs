@@ -178,6 +178,7 @@ public:
 	virtual void			SetOrigin( rvDeclPlayback *edit ) = 0;
 	virtual void			SetOrigin( rvDeclPlayback *edit, idVec3 &origin ) = 0;
 	virtual void			Copy( rvDeclPlayback *edit, rvDeclPlayback *copy ) = 0;
+	virtual void			PlaybackFinished( void ) = 0;
 };
 
 extern rvDeclPlaybackEdit		*declPlaybackEdit;

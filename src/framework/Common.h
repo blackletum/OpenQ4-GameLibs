@@ -97,7 +97,7 @@ extern idCVar		com_BinaryDeclRead;
 // jsinger: added to support loading of all decls from a single file
 #ifdef RV_SINGLE_DECL_FILE
 extern idCVar		com_SingleDeclFile;
-extern idCVar		com_WriteSingleDeclFIle;
+extern idCVar		com_WriteSingleDeclFile;
 #endif
 // jshepard: warning suppresion
 extern idCVar		com_uniqueWarnings;
