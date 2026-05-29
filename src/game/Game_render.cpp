@@ -53,6 +53,10 @@ static bool EvaluateSMAAAvailability( rvmGameRender_t& gameRender ) {
 		( gameRender.postProcessRT[1] != NULL );
 }
 
+static bool OpenQ4_BuildPortalSkyCaptureView( const renderView_t *view, renderView_t *portalSkyView ) {
+	return gameLocal.BuildPortalSkyRenderView( view, portalSkyView, gameRenderWorld );
+}
+
 static void UpdatePostAAWarningState( rvmGameRender_t& gameRender, int warningState ) {
 	if ( gameRender.postAAWarningState == warningState ) {
 		return;
@@ -131,6 +135,10 @@ idGameLocal::ShutdownGameRenderSystem
 ========================
 */
 void idGameLocal::ShutdownGameRenderSystem( void ) {
+	if ( renderSystem != NULL ) {
+		renderSystem->SetPortalSkyCaptureViewCallback( NULL );
+	}
+
 	for ( int i = 0; i < 2; i++ ) {
 		if ( gameRender.postProcessRT[i] != NULL ) {
 			renderSystem->DestroyRenderTexture( gameRender.postProcessRT[i] );
@@ -186,6 +194,8 @@ void idGameLocal::InitGameRenderSystem(void) {
 	if ( !renderSystem->IsOpenGLRunning() ) {
 		return;
 	}
+
+	renderSystem->SetPortalSkyCaptureViewCallback( OpenQ4_BuildPortalSkyCaptureView );
 
 	const int requestedMsaaSamples = Max( 0, cvarSystem->GetCVarInteger( "r_multiSamples" ) );
 
@@ -377,6 +387,20 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 		( gameRender.blurPostProcessMaterial != NULL );
 	const bool wantsSMAA = ( cvarSystem->GetCVarInteger( "r_postAA" ) == 1 );
 	const bool wantsCAS = g_renderCasUpscale.GetBool() && gameRender.casPostProcessMaterial != NULL;
+	if ( wantsSMAA && gameRender.smaaAvailable ) {
+		gameRender.smaaAvailable = EvaluateSMAAAvailability( gameRender );
+	}
+	int postAAWarningState = OPENQ4_POST_AA_WARNING_NONE;
+	if ( wantsSMAA ) {
+		if ( cvarSystem->GetCVarBool( "r_usePostLightingStack" ) ) {
+			postAAWarningState = OPENQ4_POST_AA_WARNING_POST_LIGHTING_STACK;
+		} else if ( !gameRender.smaaAvailable ) {
+			postAAWarningState = OPENQ4_POST_AA_WARNING_UNAVAILABLE;
+		}
+	}
+	UpdatePostAAWarningState( gameRender, postAAWarningState );
+
+	const bool useSMAA = wantsSMAA && ( postAAWarningState == OPENQ4_POST_AA_WARNING_NONE );
 
 	const bool canUseFastNoPost =
 		g_renderFastNoPost.GetBool() &&
@@ -413,6 +437,59 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 		return;
 	}
 
+	if ( useSMAA ) {
+		OpenQ4_RenderSceneDirect( view, renderWorld, portalSky, renderFlags );
+		renderSystem->CaptureRenderToImage( "_currentRender" );
+
+		// Pass 1: edge detection into _postProcessAlbedo1.
+		renderSystem->BindRenderTexture( gameRender.postProcessRT[1], nullptr );
+		renderSystem->ClearRenderTarget( true, true, 1.0f, 0.0f, 0.0f, 0.0f );
+		renderSystem->DrawStretchPic(
+			0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT,
+			0.0f, 1.0f, 1.0f, 0.0f,
+			gameRender.smaaEdgePostProcessMaterial );
+
+		// Pass 2: blending weight calculation into _postProcessAlbedo0.
+		renderSystem->BindRenderTexture( gameRender.postProcessRT[0], nullptr );
+		renderSystem->ClearRenderTarget( true, true, 1.0f, 0.0f, 0.0f, 0.0f );
+		renderSystem->DrawStretchPic(
+			0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT,
+			0.0f, 1.0f, 1.0f, 0.0f,
+			gameRender.smaaWeightsPostProcessMaterial );
+
+		// Pass 3: neighborhood blending into _postProcessAlbedo1, then copy the
+		// final SMAA output back into _postProcessAlbedo0 for the rest of the post stack.
+		renderSystem->BindRenderTexture( gameRender.postProcessRT[1], nullptr );
+		renderSystem->ClearRenderTarget( true, true, 1.0f, 0.0f, 0.0f, 0.0f );
+		renderSystem->DrawStretchPic(
+			0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT,
+			0.0f, 1.0f, 1.0f, 0.0f,
+			gameRender.smaaBlendPostProcessMaterial );
+		renderSystem->CaptureRenderToImage( "_postProcessAlbedo0" );
+		renderSystem->BindRenderTexture( nullptr, nullptr );
+
+		const idMaterial* finalMaterial = gameRender.noPostProcessMaterial;
+		if ( blurEnabled ) {
+			finalMaterial = gameRender.blurPostProcessMaterial;
+		} else if ( g_renderCasUpscale.GetBool() && gameRender.casPostProcessMaterial != NULL ) {
+			finalMaterial = gameRender.casPostProcessMaterial;
+		}
+		if ( finalMaterial == NULL ) {
+			OpenQ4_RenderSceneDirect( view, renderWorld, portalSky, renderFlags );
+			renderSystem->SetUseUIViewportFor2D( previousUIViewportMode );
+			return;
+		}
+
+		renderSystem->ClearRenderTarget( false, true, 1.0f, 0.0f, 0.0f, 0.0f );
+		OpenQ4_DrawFullScreenMaterial( finalMaterial );
+
+		if ( g_renderCaptureCurrentRender.GetBool() ) {
+			renderSystem->CaptureRenderToImage( "_currentRender" );
+		}
+		renderSystem->SetUseUIViewportFor2D( previousUIViewportMode );
+		return;
+	}
+
 	// Render the scene to the forward render pass rendertexture.
 	renderSystem->BindRenderTexture(gameRender.forwardRenderPassRT, nullptr);
 	{
@@ -434,21 +511,6 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 		renderSystem->ClearRenderTarget( true, true, 1.0f, 0.0f, 0.0f, 0.0f );
 		OpenQ4_DrawFullScreenMaterial( gameRender.resolvePostProcessMaterial );
 	renderSystem->BindRenderTexture( nullptr, nullptr );
-
-	if ( wantsSMAA && gameRender.smaaAvailable ) {
-		gameRender.smaaAvailable = EvaluateSMAAAvailability( gameRender );
-	}
-	int postAAWarningState = OPENQ4_POST_AA_WARNING_NONE;
-	if ( wantsSMAA ) {
-		if ( cvarSystem->GetCVarBool( "r_usePostLightingStack" ) ) {
-			postAAWarningState = OPENQ4_POST_AA_WARNING_POST_LIGHTING_STACK;
-		} else if ( !gameRender.smaaAvailable ) {
-			postAAWarningState = OPENQ4_POST_AA_WARNING_UNAVAILABLE;
-		}
-	}
-	UpdatePostAAWarningState( gameRender, postAAWarningState );
-
-	const bool useSMAA = wantsSMAA && ( postAAWarningState == OPENQ4_POST_AA_WARNING_NONE );
 	if ( useSMAA ) {
 		// Pass 1: edge detection into _postProcessAlbedo1.
 		renderSystem->BindRenderTexture( gameRender.postProcessRT[1], nullptr );

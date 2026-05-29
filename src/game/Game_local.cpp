@@ -3535,6 +3535,41 @@ bool idGameLocal::SetupPortalSkyPVS( idPlayer *player ) {
 	// If any visible area has a skybox component, merge in the portal sky.
 	return ( i != numAreas );
 }
+
+bool idGameLocal::BuildPortalSkyRenderView( const renderView_t *view, renderView_t *portalSkyView, idRenderWorld *renderWorld ) const {
+	if ( view == NULL || portalSkyView == NULL || portalSky == NULL ) {
+		return false;
+	}
+
+	idRenderWorld *targetWorld = ( renderWorld != NULL ) ? renderWorld : gameRenderWorld;
+	if ( targetWorld == NULL ) {
+		return false;
+	}
+
+	const int numAreas = targetWorld->NumAreas();
+	if ( numAreas <= 0 ) {
+		return false;
+	}
+
+	const int areaNum = targetWorld->PointInArea( view->vieworg );
+	if ( areaNum < 0 || areaNum >= numAreas ) {
+		return false;
+	}
+
+	bool *visibleAreas = ( bool * )_alloca( numAreas );
+	memset( visibleAreas, 0, numAreas );
+	targetWorld->FindVisibleAreas( view->vieworg, areaNum, visibleAreas );
+
+	for ( int i = 0; i < numAreas; i++ ) {
+		if ( visibleAreas[i] && targetWorld->HasSkybox( i ) ) {
+			*portalSkyView = *view;
+			portalSky->GetViewParms( portalSkyView );
+			return true;
+		}
+	}
+
+	return false;
+}
 // RAVEN END
 
 /*

@@ -1217,6 +1217,7 @@ public:
 	int						GetCurrentDemoProtocol( void ) { return demo_protocol; }
 // jmarshall
 	void					RenderScene(const renderView_t* view, idRenderWorld* renderWorld, idCamera* portalSky, int renderFlags = RF_NORMAL);
+	bool					BuildPortalSkyRenderView( const renderView_t *view, renderView_t *portalSkyView, idRenderWorld *renderWorld = NULL ) const;
 private:	
 	void					ResizeRenderTextures(int width, int height);
 	void					InitGameRenderSystem(void);
