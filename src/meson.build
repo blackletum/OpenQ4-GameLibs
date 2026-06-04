@@ -2,15 +2,15 @@ py = import('python').find_installation(required : true)
 cpp = meson.get_compiler('cpp')
 
 if host_machine.system() != 'windows'
-  error('OpenQ4-GameLibs Meson build currently targets Windows only.')
+  error('openQ4-GameLibs Meson build currently targets Windows only.')
 endif
 
 if cpp.get_id() != 'msvc'
-  error('OpenQ4-GameLibs Meson build requires MSVC cl.exe.')
+  error('openQ4-GameLibs Meson build requires MSVC cl.exe.')
 endif
 
 if host_machine.cpu_family() != 'x86'
-  error('OpenQ4-GameLibs Meson build requires an x86 (32-bit) toolchain. Use an x86 Visual Studio environment.')
+  error('openQ4-GameLibs Meson build requires an x86 (32-bit) toolchain. Use an x86 Visual Studio environment.')
 endif
 
 game_arch = host_machine.cpu_family()
@@ -188,5 +188,5 @@ summary(
     'Inline Debug': get_option('inline_debug') and not release_like,
     'Legacy Include': mssdk_include == '' ? '(disabled)' : mssdk_include,
   },
-  section : 'OpenQ4-GameLibs',
+  section : 'openQ4-GameLibs',
 )

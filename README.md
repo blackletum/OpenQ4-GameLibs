@@ -1,10 +1,10 @@
-# OpenQ4-GameLibs
+# openQ4-GameLibs
 
-Quake 4 game libraries maintained for use with the OpenQ4 engine project.
+Quake 4 game libraries maintained for use with the openQ4 engine project.
 
 ## Overview
-OpenQ4-GameLibs contains Quake4SDK-derived single-player and multiplayer game library code, maintained with a compatibility-first focus for modern development workflows.
-This repository is the canonical home for SDK/game-library source used by the OpenQ4 workspace.
+openQ4-GameLibs contains Quake4SDK-derived single-player and multiplayer game library code, maintained with a compatibility-first focus for modern development workflows.
+This repository is the canonical home for SDK/game-library source used by the openQ4 workspace.
 
 ## Included
 - Game library source code in `src/game` and `src/mpgame`
@@ -30,7 +30,7 @@ Requirements:
 3. Outputs:
    `builddir/src/game-sp_x86.dll` and `builddir/src/game-mp_x86.dll`
 
-From OpenQ4, you can invoke this same flow with:
+From openQ4, you can invoke this same flow with:
 `powershell -ExecutionPolicy Bypass -File tools/build/build_gamelibs.ps1`
 
 ### Useful Configure Options
@@ -42,11 +42,11 @@ From OpenQ4, you can invoke this same flow with:
   `meson setup builddir --buildtype debug -Dinline_debug=true`
 
 ## Integration
-- Intended to pair with OpenQ4 engine builds.
+- Intended to pair with openQ4 engine builds.
 - Requires user-supplied Quake 4 game data.
-- Companion engine repository: `https://github.com/themuffinator/OpenQ4`
-- Default local companion path: `..\OpenQ4` (sibling repo layout).
-- OpenQ4 build wrappers can invoke this repository directly from `..\OpenQ4-GameLibs`.
+- Companion engine repository: `https://github.com/themuffinator/openQ4`
+- Default local companion path: `..\openQ4` (sibling repo layout).
+- openQ4 build wrappers can invoke this repository directly from `..\openQ4-GameLibs`.
 
 ## Project Goals
 - Preserve original Quake 4 gameplay behavior.
@@ -57,7 +57,7 @@ From OpenQ4, you can invoke this same flow with:
 - Upstream Quake4SDK (Quake 4 v1.4.2 SDK baseline)
 - id Software
 - Raven Software
-- OpenQ4 contributors
+- openQ4 contributors
 
 ## License
 This repository is licensed under the Quake 4 Software Development Kit Limited Use License Agreement (EULA), not the GNU GPL.

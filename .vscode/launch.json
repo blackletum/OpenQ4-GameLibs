@@ -2,11 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Launch OpenQ4 (no build)",
+      "name": "Launch openQ4 (no build)",
       "type": "cppvsdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/../OpenQ4/build_meson/OpenQ4.exe",
-      "cwd": "${workspaceFolder}/../OpenQ4/build_meson",
+      "program": "${workspaceFolder}/../openQ4/build_meson/openQ4.exe",
+      "cwd": "${workspaceFolder}/../openQ4/build_meson",
       "args": [],
       "stopAtEntry": false,
       "console": "integratedTerminal"

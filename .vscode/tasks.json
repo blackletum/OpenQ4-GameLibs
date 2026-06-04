@@ -49,12 +49,12 @@
       "problemMatcher": []
     },
     {
-      "label": "launch: OpenQ4 (no build)",
+      "label": "launch: openQ4 (no build)",
       "type": "process",
-      "command": "${workspaceFolder}/../OpenQ4/build_meson/OpenQ4.exe",
+      "command": "${workspaceFolder}/../openQ4/build_meson/openQ4.exe",
       "args": [],
       "options": {
-        "cwd": "${workspaceFolder}/../OpenQ4/build_meson"
+        "cwd": "${workspaceFolder}/../openQ4/build_meson"
       },
       "problemMatcher": []
     }

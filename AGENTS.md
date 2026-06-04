@@ -1,18 +1,18 @@
-# OpenQ4-GameLibs Agent Guide
+# openQ4-GameLibs Agent Guide
 
-This file describes project goals, rules, and upstream credits for anyone working on OpenQ4-GameLibs.
+This file describes project goals, rules, and upstream credits for anyone working on openQ4-GameLibs.
 
 **Project Metadata**
-- Name: OpenQ4-GameLibs
+- Name: openQ4-GameLibs
 - Author: themuffinator
 - Company: DarkMatter Productions
 - Version: 0.0.1
 - Website: `www.darkmatter-quake.com`
-- Repository: `https://github.com/themuffinator/OpenQ4-GameLibs`
-- Companion Engine Repo (local): `E:\Repositories\OpenQ4`
+- Repository: `https://github.com/themuffinator/openQ4-GameLibs`
+- Companion Engine Repo (local): `E:\Repositories\openQ4`
 
 **Goals**
-- Deliver compatibility-focused Quake 4 game libraries for OpenQ4 integration.
+- Deliver compatibility-focused Quake 4 game libraries for openQ4 integration.
 - Preserve behavior required by original Quake 4 SDK expectations and shipped game data.
 - Maintain single-player and multiplayer parity where behavior should remain shared.
 - Modernize build and maintenance workflows for current systems while avoiding gameplay regressions.
@@ -20,7 +20,7 @@ This file describes project goals, rules, and upstream credits for anyone workin
 
 **Repository Rules (Agent-Only)**
 - Compatibility with Quake 4 SDK behavior is the primary requirement.
-- Treat this repo and `E:\Repositories\OpenQ4` as one development workspace; cross-repo coordination is expected, not optional.
+- Treat this repo and `E:\Repositories\openQ4` as one development workspace; cross-repo coordination is expected, not optional.
 - Treat public game-library interfaces used by the engine as stability boundaries unless coordinated cross-repo changes are intentional.
 - Prefer engine or code fixes over shipping replacement content files when resolving compatibility issues.
 - Keep `README.md` end-user focused: no local machine paths, no maintainer-only rules, and no internal-only process notes.
@@ -31,16 +31,16 @@ This file describes project goals, rules, and upstream credits for anyone workin
 
 **Development Procedure (Recommended)**
 1. Build game libraries with Meson/Ninja (`powershell -ExecutionPolicy Bypass -File tools/build/meson_setup.ps1 setup --wipe builddir . --backend ninja --buildtype release --vsenv`, then `... meson_setup.ps1 compile -C builddir`).
-2. Validate behavior using OpenQ4 (`E:\Repositories\OpenQ4`) against original Quake 4 assets.
+2. Validate behavior using openQ4 (`E:\Repositories\openQ4`) against original Quake 4 assets.
 3. Review runtime logs in the active Quake 4 install.
 4. Iterate until compatibility and stability targets are met.
 
 **Cross-Repo Workflow (Agent-Only)**
-- OpenQ4 (`tools/build/meson_setup.ps1`) can trigger this repo's build during OpenQ4 compile runs when `OPENQ4_BUILD_GAMELIBS=1`.
-- OpenQ4 `src/game` is treated as a synchronized mirror of `OpenQ4-GameLibs/src/game`; apply canonical game-library source edits here first.
+- openQ4 (`tools/build/meson_setup.ps1`) can trigger this repo's build during openQ4 compile runs when `OPENQ4_BUILD_GAMELIBS=1`.
+- openQ4 `src/game` is treated as a synchronized mirror of `openQ4-GameLibs/src/game`; apply canonical game-library source edits here first.
 
 **Local References (Agent-Only, Not Included In Repo)**
-- OpenQ4 engine project: `E:\Repositories\OpenQ4`
+- openQ4 engine project: `E:\Repositories\openQ4`
 - Quake 4 SDK: `E:\_src\\_CODE\Quake4-1.4.2-SDK`
 - Upstream engine base (local folder name retained): `E:\_src\\_CODE\Quake4Doom-master`
 - Quake 4 BSE (Basic Set of Effects): `E:\_src\\_CODE\Quake4BSE-master`
@@ -50,6 +50,6 @@ This file describes project goals, rules, and upstream credits for anyone workin
 - Upstream Quake4SDK (Quake 4 v1.4.2 SDK baseline).
 - id Software.
 - Raven Software.
-- OpenQ4 contributors.
+- openQ4 contributors.
 - Justin Marshall.
 - Robert Backebans.

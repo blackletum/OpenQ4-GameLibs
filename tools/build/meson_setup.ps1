@@ -96,7 +96,7 @@ function Copy-GameLibrariesToInstallGameDir {
         [string]$RepoRoot
     )
 
-    $installGameDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "..\OpenQ4\.install\baseoq4"))
+    $installGameDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "..\openQ4\.install\baseoq4"))
     New-Item -Path $installGameDir -ItemType Directory -Force | Out-Null
 
     $binaries = @(

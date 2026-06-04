@@ -1,5 +1,5 @@
 project(
-  'OpenQ4-GameLibs',
+  'openQ4-GameLibs',
   'cpp',
   version : '0.0.1',
   default_options : [
