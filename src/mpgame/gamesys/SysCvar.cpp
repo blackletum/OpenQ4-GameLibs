@@ -162,7 +162,7 @@ idCVar g_forceMarineModel(			"g_forceMarineModel",		"",			CVAR_GAME | CVAR_ARCHI
 idCVar g_fixedHorizFOV(				"r_fixedHorizFOV",			"0",			CVAR_RENDERER | CVAR_BOOL, "vertical stretch for letterboxed cinematics authored for 4:3 aspect" );
 idCVar g_cinematic(					"g_cinematic",				"1",			CVAR_GAME | CVAR_BOOL, "skips updating entities that aren't marked 'cinematic' '1' during cinematics" );
 idCVar g_cinematicMaxSkipTime(		"g_cinematicMaxSkipTime",	"600",			CVAR_GAME | CVAR_FLOAT, "# of seconds to allow game to run when skipping cinematic.  prevents lock-up when cinematic doesn't end.", 0, 3600 );
-idCVar g_autoSkipCinematics(		"g_autoSkipCinematics",		"0",			CVAR_GAME | CVAR_BOOL, "automatically skips cinematics as soon as they start" );
+idCVar g_autoSkipCinematics(		"g_autoSkipCinematics",		"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "automatically skips cinematics as soon as they start" );
 idCVar g_corpseRemoveDelayMP(		"g_corpseRemoveDelayMP",	"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_FLOAT, "seconds before multiplayer corpses begin disappearing (0 = stock timing, -1 = never)", -1, 6000 );
 idCVar g_corpseSink(				"g_corpseSink",				"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_INTEGER, "corpse sink mode (0 = off, 1 = ragdoll sink, 2 = no-ragdoll sink)", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
 
@@ -497,6 +497,9 @@ idCVar g_brassTime(					"g_brassTime",				"1",			CVAR_GAME | PC_CVAR_ARCHIVE | C
 idCVar g_gun_x(						"g_gunX",					"1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_FLOAT, "" );
 idCVar g_gun_y(						"g_gunY",					"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_FLOAT, "" );
 idCVar g_gun_z(						"g_gunZ",					"-1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_FLOAT, "" );
+idCVar cl_gun_x(					"cl_gun_x",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_NOCHEAT, "client first-person weapon right offset" );
+idCVar cl_gun_y(					"cl_gun_y",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_NOCHEAT, "client first-person weapon forward offset" );
+idCVar cl_gun_z(					"cl_gun_z",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_NOCHEAT, "client first-person weapon up offset" );
 idCVar g_weaponFovEffect(			"g_weaponFovEffect",		"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "Adjusts the position of the weapon model with increased fov" );
 
 idCVar g_viewNodalX(				"g_viewNodalX",				"0",			CVAR_GAME | CVAR_FLOAT, "" );

@@ -10795,7 +10795,9 @@ void idPlayer::CalculateViewWeaponPos( idVec3 &origin, idMat3 &axis ) {
 		fovOffset = -0.1f * ( curfov - 90.0f );
 
 	// these cvars are just for hand tweaking before moving a value to the weapon def
-	idVec3	gunpos( g_gun_x.GetFloat(), g_gun_y.GetFloat(), g_gun_z.GetFloat() + fovOffset );
+	idVec3	gunpos( g_gun_x.GetFloat() + cl_gun_x.GetFloat(),
+					g_gun_y.GetFloat() + cl_gun_y.GetFloat(),
+					g_gun_z.GetFloat() + cl_gun_z.GetFloat() + fovOffset );
 	
 	const idPlayer* player = gameLocal.GetLocalPlayer();
 	if (player && (this == player || player->spectating && player->spectator == this->entityNumber) ) {
