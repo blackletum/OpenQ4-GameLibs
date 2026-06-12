@@ -227,6 +227,224 @@ void Cmd_Script_f( const idCmdArgs &args ) {
 	}
 }
 
+/*
+===================
+Cmd_StartScriptText
+===================
+*/
+static void Cmd_StartScriptText( const char *sourceName, const char *funcPrefix, const char *script ) {
+	idStr			text;
+	idStr			funcname;
+	static int		funccount = 0;
+	idThread *		thread;
+	const function_t *func;
+	idEntity		*ent;
+
+	if ( !gameLocal.CheatsOk() ) {
+		return;
+	}
+
+	funcname = va( "%s_%d", funcPrefix, funccount++ );
+	text = va( "void %s() {%s;}\n", funcname.c_str(), script );
+
+	if ( gameLocal.program.CompileText( sourceName, text, true ) ) {
+		func = gameLocal.program.FindFunction( funcname );
+		if ( func ) {
+			for( ent = gameLocal.spawnedEntities.Next(); ent != NULL; ent = ent->spawnNode.Next() ) {
+				gameLocal.program.SetEntity( ent->name, ent );
+			}
+
+			thread = new idThread( func );
+			thread->Start();
+		}
+	}
+}
+
+/*
+===================
+Cmd_LogMccLandingBorkedLiftState
+===================
+*/
+static void Cmd_LogMccLandingBorkedLiftState( const char *tag ) {
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	idEntity *elevator = gameLocal.FindEntity( "afterGunElevator" );
+	idEntity *borkedLift = gameLocal.FindEntity( "borkedLift" );
+
+	if ( !player ) {
+		gameLocal.Printf( "DBG borkedliftstate %s no local player\n", tag );
+		return;
+	}
+
+	idPhysics *physics = player->GetPhysics();
+	idEntity *ground = player->GetGroundEntity();
+	const idVec3 &playerOrigin = physics->GetOrigin();
+	const idVec3 &playerVelocity = physics->GetLinearVelocity();
+	const idBounds &playerBounds = physics->GetAbsBounds();
+	idEntity *touchedEntity = NULL;
+	int contents = gameLocal.Contents( player, playerOrigin, physics->GetClipModel(), physics->GetAxis(), physics->GetClipMask(), player, &touchedEntity );
+	const char *touchName = contents ? "<world>" : "<none>";
+	const char *touchClass = contents ? "<world>" : "<none>";
+	int touchEntityNum = contents ? ENTITYNUM_WORLD : -1;
+	int borkContents = borkedLift ? borkedLift->GetPhysics()->GetContents() : -1;
+	int borkSolid = borkedLift ? borkedLift->spawnArgs.GetBool( "solid" ) : -1;
+	idStr borkMins = "<removed>";
+	idStr borkMaxs = "<removed>";
+
+	if ( touchedEntity ) {
+		touchName = touchedEntity->GetName();
+		touchClass = touchedEntity->GetClassname();
+		touchEntityNum = touchedEntity->entityNumber;
+	}
+	if ( borkedLift ) {
+		const idBounds &borkBounds = borkedLift->GetPhysics()->GetAbsBounds();
+		borkMins = borkBounds[0].ToString( 2 );
+		borkMaxs = borkBounds[1].ToString( 2 );
+	}
+
+	gameLocal.Printf(
+		"DBG borkedliftstate %s p=%s v=%s ground=%d:%s:%s contacts=%d contents=%d touch=%d:%s:%s bounds=(%s)-(%s) elevator=%s borkHidden=%d borkContents=%d borkSolid=%d borkBounds=(%s)-(%s)\n",
+		tag,
+		playerOrigin.ToString( 2 ),
+		playerVelocity.ToString( 2 ),
+		ground ? ground->entityNumber : -1,
+		ground ? ground->GetName() : "<none>",
+		ground ? ground->GetClassname() : "<none>",
+		physics->GetNumContacts(),
+		contents,
+		touchEntityNum,
+		touchName,
+		touchClass,
+		playerBounds[0].ToString( 2 ),
+		playerBounds[1].ToString( 2 ),
+		elevator ? elevator->GetPhysics()->GetOrigin().ToString( 2 ) : "<removed>",
+		borkedLift ? borkedLift->IsHidden() : -1,
+		borkContents,
+		borkSolid,
+		borkMins.c_str(),
+		borkMaxs.c_str()
+	);
+
+	for ( int i = 0; i < physics->GetNumContacts(); i++ ) {
+		const contactInfo_t &contact = physics->GetContact( i );
+		idEntity *contactEntity = ( contact.entityNum >= 0 && contact.entityNum < MAX_GENTITIES ) ? gameLocal.entities[ contact.entityNum ] : NULL;
+		const char *contactName = "<none>";
+		const char *contactClass = "<none>";
+
+		if ( contact.entityNum == ENTITYNUM_WORLD ) {
+			contactName = "<world>";
+			contactClass = "<world>";
+		} else if ( contactEntity ) {
+			contactName = contactEntity->GetName();
+			contactClass = contactEntity->GetClassname();
+		}
+
+		gameLocal.Printf(
+			"DBG borkedliftcontact %s[%d] ent=%d:%s:%s id=%d point=%s normal=%s contents=%d\n",
+			tag,
+			i,
+			contact.entityNum,
+			contactName,
+			contactClass,
+			contact.id,
+			contact.point.ToString( 2 ),
+			contact.normal.ToString( 2 ),
+			contact.contents
+		);
+	}
+}
+
+/*
+===================
+Cmd_MccLandingBorkedLiftState_f
+===================
+*/
+static void Cmd_MccLandingBorkedLiftState_f( const idCmdArgs &args ) {
+	Cmd_LogMccLandingBorkedLiftState( args.Argc() > 1 ? args.Argv( 1 ) : "manual" );
+}
+
+/*
+===================
+Cmd_MccLandingBorkedLiftTest_f
+===================
+*/
+static void Cmd_MccLandingBorkedLiftTest_f( const idCmdArgs &args ) {
+	idStr mapName = gameLocal.GetMapName();
+
+	mapName.BackSlashesToSlashes();
+	mapName.StripFileExtension();
+	if ( mapName.Icmp( "game/mcc_landing" ) != 0 && mapName.Icmp( "maps/game/mcc_landing" ) != 0 ) {
+		gameLocal.Printf( "mccLandingBorkedLiftTest requires map game/mcc_landing; current map is %s\n", mapName.c_str() );
+		return;
+	}
+
+	Cmd_StartScriptText(
+		"mccLandingBorkedLiftTest",
+		"MccLandingBorkedLiftTest",
+		"map_mcc_landing::doorDestroyed();"
+		"sys.wait(0.25);"
+		"map_mcc_landing::bringDownLift();"
+		"sys.wait(4.0);"
+		"$trigger_once_68.remove();"
+		"$afterGunElevator.updateFloorInfo();"
+		"sys.println(\"DBG borkedlift bottom p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"$player1.setWorldOrigin('6440 832 52.25');"
+		"$player1.setViewAngles('0 0 0');"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift placed p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"$afterGunElevator.gotoFloor(2);"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t025 p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t050 p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t075 p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t100 p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t125 p=\" + $player1.getWorldOrigin() + \" e=\" + $afterGunElevator.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t150 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t175 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t200 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t225 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t250 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t275 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+		"sys.wait(0.25);"
+		"sys.println(\"DBG borkedlift t300 p=\" + $player1.getWorldOrigin() + \" h=\" + $borkedLift.isHidden());"
+	);
+
+	cmdSystem->BufferCommandText(
+		CMD_EXEC_INSERT,
+		"waitMsec 6250\n"
+		"mccLandingBorkedLiftState preRide\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c025\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c050\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c075\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c100\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c125\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c150\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c175\n"
+		"waitMsec 250\n"
+		"mccLandingBorkedLiftState c200\n"
+		"waitMsec 500\n"
+		"mccLandingBorkedLiftState c250\n"
+		"waitMsec 1000\n"
+		"mccLandingBorkedLiftState c350\n"
+	);
+}
+
 // RAVEN BEGIN
 // jscott: exports for tracking memory
 /*
@@ -3277,6 +3495,8 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "getviewpos",			Cmd_GetViewpos_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"prints the current view position" );
 	cmdSystem->AddCommand( "viewpos",				Cmd_Viewpos_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"prints the current view origin and angles" );
 	cmdSystem->AddCommand( "setviewpos",			Cmd_SetViewpos_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"sets the current view position" );
+	cmdSystem->AddCommand( "mccLandingBorkedLiftTest", Cmd_MccLandingBorkedLiftTest_f, CMD_FL_GAME|CMD_FL_CHEAT, "sets up the MCC Landing broken lift repro" );
+	cmdSystem->AddCommand( "mccLandingBorkedLiftState", Cmd_MccLandingBorkedLiftState_f, CMD_FL_GAME|CMD_FL_CHEAT, "prints MCC Landing broken lift player contact state" );
 	cmdSystem->AddCommand( "gotolevelshot",			Cmd_GotoLevelshot_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"moves the view to the levelshot position" );
 	cmdSystem->AddCommand( "teleport",				Cmd_Teleport_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"teleports the player to an entity location", idGameLocal::ArgCompletion_EntityName );
 	cmdSystem->AddCommand( "trigger",				Cmd_Trigger_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"triggers an entity", idGameLocal::ArgCompletion_EntityName );

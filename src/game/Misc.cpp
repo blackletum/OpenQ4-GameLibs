@@ -2281,6 +2281,64 @@ void idStaticEntity::Restore( idRestoreGame *savefile ) {
 	savefile->ReadBool( runGui );
 }
 
+static bool IsMccLandingBorkedLift( const idStaticEntity *ent ) {
+	idStr mapName = gameLocal.GetMapName();
+
+	// Stock mcc_landing can show this visual replacement while the player is still inside the moving lift volume.
+	mapName.BackSlashesToSlashes();
+	mapName.StripFileExtension();
+
+	if ( mapName.Icmp( "game/mcc_landing" ) != 0 && mapName.Icmp( "maps/game/mcc_landing" ) != 0 ) {
+		return false;
+	}
+	if ( idStr::Icmp( ent->GetName(), "borkedLift" ) != 0 ) {
+		return false;
+	}
+	if ( idStr::Icmp( ent->spawnArgs.GetString( "model" ), "models/mapobjects/strogg/machines/elevators_and_lifts/lift_7_28/strogglift_final.lwo" ) != 0 ) {
+		return false;
+	}
+	if ( idStr::Icmp( ent->spawnArgs.GetString( "gui" ), "guis/monitors/strogg/broken2.gui" ) != 0 ) {
+		return false;
+	}
+
+	return true;
+}
+
+static void MccLandingResolveBorkedLiftPlayerClip( idStaticEntity *ent ) {
+	if ( !IsMccLandingBorkedLift( ent ) ) {
+		return;
+	}
+
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( !player ) {
+		return;
+	}
+
+	idPhysics *playerPhysics = player->GetPhysics();
+	idEntity *touchedEntity = NULL;
+	if ( gameLocal.Contents( player, playerPhysics->GetOrigin(), playerPhysics->GetClipModel(), playerPhysics->GetAxis(), playerPhysics->GetClipMask(), player, &touchedEntity ) == 0 || touchedEntity != ent ) {
+		return;
+	}
+
+	const idVec3 start = playerPhysics->GetOrigin();
+	const idVec3 up = -playerPhysics->GetGravityNormal();
+
+	for ( float lift = 1.0f; lift <= 48.0f; lift += 1.0f ) {
+		const idVec3 candidate = start + up * lift;
+
+		touchedEntity = NULL;
+		if ( gameLocal.Contents( player, candidate, playerPhysics->GetClipModel(), playerPhysics->GetAxis(), playerPhysics->GetClipMask(), player, &touchedEntity ) != 0 ) {
+			continue;
+		}
+
+		idVec3 velocity = playerPhysics->GetLinearVelocity();
+		velocity -= up * ( velocity * up );
+		player->SetOrigin( candidate );
+		playerPhysics->SetLinearVelocity( velocity );
+		return;
+	}
+}
+
 /*
 ===============
 idStaticEntity::Spawn
@@ -2415,6 +2473,7 @@ void idStaticEntity::Show( void ) {
 	idEntity::Show();
 	if ( spawnArgs.GetBool( "solid" ) ) {
 		GetPhysics()->SetContents( CONTENTS_SOLID );
+		MccLandingResolveBorkedLiftPlayerClip( this );
 	}
 }
 
