@@ -1084,6 +1084,10 @@ private:
 	idDict					newInfo;
 
 	idStrList				shakeSounds;
+	bool					mapMediaPrecacheActive;
+	idHashTable<int>		mapMediaPrecacheSeen;
+	int						mapMediaPrecacheRequests;
+	int						mapMediaPrecacheSkips;
 
 // jmarshall
 	rvmGameRender_t			gameRender;
@@ -1169,6 +1173,9 @@ private:
 
 	void					DumpOggSounds( void );
 	void					GetShakeSounds( const idDict *dict );
+	void					BeginMapMediaPrecache( void );
+	void					EndMapMediaPrecache( void );
+	bool					RememberMapMediaPrecache( const char *kind, const char *value );
 	bool					ValidateServerSettings( const char *map, const char *gametype );
 
 	void					Tokenize( idStrList &out, const char *in );

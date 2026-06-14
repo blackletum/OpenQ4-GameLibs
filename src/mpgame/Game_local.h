@@ -1095,6 +1095,10 @@ private:
 	idDict					newInfo;
 
 	idStrList				shakeSounds;
+	bool					mapMediaPrecacheActive;
+	idHashTable<int>		mapMediaPrecacheSeen;
+	int						mapMediaPrecacheRequests;
+	int						mapMediaPrecacheSkips;
 
 	idMsgQueue				unreliableMessages[ MAX_CLIENTS+1 ];	// MAX_CLIENTS slot for server demo recording
 
@@ -1155,6 +1159,9 @@ private:
 
 	void					DumpOggSounds( void );
 	void					GetShakeSounds( const idDict *dict );
+	void					BeginMapMediaPrecache( void );
+	void					EndMapMediaPrecache( void );
+	bool					RememberMapMediaPrecache( const char *kind, const char *value );
 	bool					ValidateServerSettings( const char *map, const char *gametype );
 
 	void					Tokenize( idStrList &out, const char *in );

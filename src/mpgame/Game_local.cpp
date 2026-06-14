@@ -401,6 +401,10 @@ void idGameLocal::Clear( void ) {
 	playerPVS.h = -1;
 	playerConnectedAreas.i = -1;
 	playerConnectedAreas.h = -1;
+	mapMediaPrecacheActive = false;
+	mapMediaPrecacheSeen.Clear();
+	mapMediaPrecacheRequests = 0;
+	mapMediaPrecacheSkips = 0;
 	gamestate = GAMESTATE_UNINITIALIZED;
 	skipCinematic = false;
 	influenceActive = false;
@@ -2177,6 +2181,7 @@ void idGameLocal::InitFromNewMap( const char *mapName, idRenderWorld *renderWorl
 
 	startupMsec = Sys_Milliseconds() - phaseStartMsec;
 	phaseStartMsec = Sys_Milliseconds();
+	BeginMapMediaPrecache();
 	LoadMap( mapName, randseed );
 	loadMapMsec = Sys_Milliseconds() - phaseStartMsec;
 	phaseStartMsec = Sys_Milliseconds();
@@ -2192,6 +2197,7 @@ void idGameLocal::InitFromNewMap( const char *mapName, idRenderWorld *renderWorl
 	mpGame.Reset();
 
 	mpGame.Precache();
+	EndMapMediaPrecache();
 	mpPrecacheMsec = Sys_Milliseconds() - phaseStartMsec;
 	phaseStartMsec = Sys_Milliseconds();
 
@@ -2282,6 +2288,7 @@ bool idGameLocal::InitFromSaveGame( const char *mapName, idRenderWorld *renderWo
 	g_skill.SetInteger( i );
 
 	// precache any media specified in the map
+	BeginMapMediaPrecache();
 	for ( i = 0; i < mapFile->GetNumEntities(); i++ ) {
 		idMapEntity *mapEnt = mapFile->GetEntity( i );
 
@@ -2293,6 +2300,7 @@ bool idGameLocal::InitFromSaveGame( const char *mapName, idRenderWorld *renderWo
 			}
 		}
 	}
+	EndMapMediaPrecache();
 
 	savegame.ReadDict( &si );
 	SetServerInfo( si );
@@ -2928,6 +2936,61 @@ void idGameLocal::GetShakeSounds( const idDict *dict ) {
 
 /*
 ===================
+idGameLocal::BeginMapMediaPrecache
+===================
+*/
+void idGameLocal::BeginMapMediaPrecache( void ) {
+	mapMediaPrecacheSeen.Clear();
+	mapMediaPrecacheRequests = 0;
+	mapMediaPrecacheSkips = 0;
+	mapMediaPrecacheActive = !cvarSystem->GetCVarBool( "com_makingBuild" );
+}
+
+/*
+===================
+idGameLocal::EndMapMediaPrecache
+===================
+*/
+void idGameLocal::EndMapMediaPrecache( void ) {
+	if ( mapMediaPrecacheActive && cvarSystem->GetCVarBool( "com_showLevelLoadTimes" ) && mapMediaPrecacheRequests > 0 ) {
+		Printf( "Game media precache dedup: skipped=%d unique=%d requests=%d\n",
+			mapMediaPrecacheSkips,
+			mapMediaPrecacheSeen.Num(),
+			mapMediaPrecacheRequests );
+	}
+	mapMediaPrecacheActive = false;
+}
+
+/*
+===================
+idGameLocal::RememberMapMediaPrecache
+===================
+*/
+bool idGameLocal::RememberMapMediaPrecache( const char *kind, const char *value ) {
+	if ( !mapMediaPrecacheActive || value == NULL || value[0] == '\0' ) {
+		return false;
+	}
+
+	mapMediaPrecacheRequests++;
+
+	idStr key = kind != NULL ? kind : "";
+	key += ":";
+	key += value;
+	key.BackSlashesToSlashes();
+	key.ToLower();
+
+	if ( mapMediaPrecacheSeen.Get( key.c_str() ) ) {
+		mapMediaPrecacheSkips++;
+		return true;
+	}
+
+	int remembered = 1;
+	mapMediaPrecacheSeen.Set( key.c_str(), remembered );
+	return false;
+}
+
+/*
+===================
 idGameLocal::CacheDictionaryMedia
 
 This is called after parsing an EntityDef and for each entity spawnArgs before
@@ -2973,6 +3036,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MODEL);
+			if ( RememberMapMediaPrecache( "model", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->MediaPrint( "Precaching model %s\n", kv->GetValue().c_str() );
 			// precache model/animations
 			if ( declManager->FindType( DECL_MODELDEF, kv->GetValue(), false ) == NULL ) {
@@ -2986,12 +3052,18 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_SOUND);
+			if ( RememberMapMediaPrecache( "sound", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_SOUND, kv->GetValue() );
 		} else if ( MATCH( "snd_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_SOUND);
+			if ( RememberMapMediaPrecache( "sound", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_SOUND, kv->GetValue() );
 		} else if ( MATCH( "gui_" ) ) {
 			
@@ -3003,6 +3075,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 				|| !idStr::Icmp( kv->GetKey(), "gui_inventory" ) ) {
 				// unfortunate flag names, they aren't actually a gui
 			} else {
+				if ( RememberMapMediaPrecache( "gui", kv->GetValue() ) ) {
+					continue;
+				}
 				declManager->MediaPrint( "Precaching gui %s\n", kv->GetValue().c_str() );
 				uiManager->FindGui( kv->GetValue().c_str(), true );
 			}
@@ -3011,24 +3086,36 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
 		} else if ( MATCH( "mtr_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
 		} else if ( MATCH( "screenShot" ) ) {
 		
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
 		} else if ( MATCH( "inv_icon" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
 		} else if ( MATCH( "teleport" ) ) {
 			
@@ -3037,12 +3124,18 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			MEM_SCOPED_TAG(tag,MA_EFFECT);
 			int teleportType = atoi( kv->GetValue() );
 			const char *p = ( teleportType ) ? va( "effects/teleporter%i.fx", teleportType ) : "effects/teleporter.fx";
+			if ( RememberMapMediaPrecache( "effect", p ) ) {
+				continue;
+			}
 			declManager->FindType( DECL_EFFECT, p );
 		} else if ( MATCH( "fx_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_EFFECT);
+			if ( RememberMapMediaPrecache( "effect", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->MediaPrint( "Precaching fx %s\n", kv->GetValue().c_str() );
 			declManager->FindEffect( kv->GetValue() );
 		} else if ( MATCH( "skin" ) ) {
@@ -3050,6 +3143,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			if ( RememberMapMediaPrecache( "skin", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->MediaPrint( "Precaching skin %s\n", kv->GetValue().c_str() );
 			declManager->FindType( DECL_SKIN, kv->GetValue() );
 		} else if ( MATCH( "def_" ) ) {
@@ -3057,12 +3153,18 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_DECL);
+			if ( RememberMapMediaPrecache( "def", kv->GetValue() ) ) {
+				continue;
+			}
 			FindEntityDef( kv->GetValue().c_str(), false );
 		} else if ( MATCH( "playback_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_ANIM);
+			if ( RememberMapMediaPrecache( "playback", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->MediaPrint( "Precaching playback %s\n", kv->GetValue().c_str() );
 			declManager->FindPlayback( kv->GetValue() );
 		} else if ( MATCH( "lipsync_" ) ) {
@@ -3070,6 +3172,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_ANIM);
+			if ( RememberMapMediaPrecache( "lipsync", kv->GetValue() ) ) {
+				continue;
+			}
 			declManager->MediaPrint( "Precaching lipsync %s\n", kv->GetValue().c_str() );
 			declManager->FindLipSync( kv->GetValue() );
 			declManager->FindSound ( kv->GetValue() );
@@ -3078,6 +3183,12 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			TIME_THIS_SCOPE( __FUNCLINE__);
 			
 			MEM_SCOPED_TAG(tag,MA_MATERIAL);
+			idStr iconPrecacheKey = kv->GetKey();
+			iconPrecacheKey += "=";
+			iconPrecacheKey += kv->GetValue();
+			if ( RememberMapMediaPrecache( "icon", iconPrecacheKey.c_str() ) ) {
+				continue;
+			}
 			idLexer  src ( LEXFL_ALLOWPATHNAMES );
 			idToken  token;
 			idToken	 token2;
