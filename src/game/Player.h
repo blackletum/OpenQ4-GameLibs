@@ -45,7 +45,7 @@ const int	CARRYOVER_FLAGS_MASK		= 0xF0000000;
 
 const int	MAX_SKILL_LEVELS			= 5;
 
-const float	OPENQ4_TURBO_MOVE_SCALE			= 1.25f;
+const float	OPENQ4_TURBO_MOVE_SCALE			= 1.875f;
 const float	OPENQ4_TURBO_VEHICLE_SPEED_SCALE	= 2.0f;
 
 const int	ZERO_VOLUME					= -40;			// volume at zero

@@ -19,7 +19,7 @@ static const char *guiBinaryMoverStates[] = {
 static const float OPENQ4_TURBO_MOVER_SPEED_SCALE = 2.0f;
 
 static bool OpenQ4_TurboMoversActive( void ) {
-	return g_turboMode.GetBool() && !gameLocal.isMultiplayer;
+	return OpenQ4_TurboModeActive();
 }
 
 static float OpenQ4_TurboMoverSpeed( float speed ) {

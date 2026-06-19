@@ -127,7 +127,7 @@ stateResult_t rvWeaponShotgun::State_Idle( const stateParms_t& parms ) {
 				SetState( "Lower", 4 );
 				return SRESULT_DONE;
 			}		
-			if ( !clipSize ) {
+			if ( !ClipSize() ) {
 				if ( gameLocal.time > nextAttackTime && wsfl.attack && AmmoAvailable ( ) ) {
 					SetState( "Fire", 0 );
 					return SRESULT_DONE;
@@ -177,7 +177,7 @@ stateResult_t rvWeaponShotgun::State_Fire( const stateParms_t& parms ) {
 				SetState( "Fire", 0 );
 				return SRESULT_DONE;
 			}
-			if ( clipSize ) {
+			if ( ClipSize() ) {
 				if ( (wsfl.netReload || (wsfl.reload && AmmoInClip() < ClipSize() && AmmoAvailable()>AmmoInClip())) ) {
 					SetState( "Reload", 4 );
 					return SRESULT_DONE;			

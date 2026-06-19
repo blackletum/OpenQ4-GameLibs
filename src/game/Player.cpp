@@ -9525,7 +9525,7 @@ void idPlayer::AdjustSpeed( void ) {
 	}
 
 	float crouchSpeed = pm_crouchspeed.GetFloat();
-	if ( g_turboMode.GetBool() && !gameLocal.isMultiplayer ) {
+	if ( OpenQ4_TurboModeActive() ) {
 		speed *= OPENQ4_TURBO_MOVE_SCALE;
 		crouchSpeed *= OPENQ4_TURBO_MOVE_SCALE;
 	}

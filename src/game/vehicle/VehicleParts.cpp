@@ -15,7 +15,7 @@
 #include "../ai/AI_Manager.h"
 
 static bool OpenQ4_TurboVehicleSpeedsActive( void ) {
-	return g_turboMode.GetBool() && !gameLocal.isMultiplayer;
+	return OpenQ4_TurboModeActive();
 }
 
 static float OpenQ4_TurboVehicleTopSpeed( float speed ) {

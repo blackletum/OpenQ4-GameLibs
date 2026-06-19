@@ -320,6 +320,13 @@ idAnimManager				*animationLib = NULL;
 idGameLocal					gameLocal;
 idGame *					game = &gameLocal;	// statically pointed at an idGameLocal
 
+bool OpenQ4_TurboModeActive( void ) {
+	if ( gameLocal.isMultiplayer ) {
+		return false;
+	}
+	return g_turboMode.GetBool() || ( cvarSystem != NULL && cvarSystem->GetCVarBool( "g_turboMode" ) );
+}
+
 const char *idGameLocal::sufaceTypeNames[ MAX_SURFACE_TYPES ] = {
 	"none",	"metal", "stone", "flesh", "wood", "cardboard", "liquid", "glass", "plastic",
 	"ricochet", "surftype10", "surftype11", "surftype12", "surftype13", "surftype14", "surftype15"

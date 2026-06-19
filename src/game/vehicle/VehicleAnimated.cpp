@@ -14,7 +14,7 @@ CLASS_DECLARATION( rvVehicle, rvVehicleAnimated )
 END_CLASS
 
 static bool OpenQ4_TurboVehicleSpeedsActive( void ) {
-	return g_turboMode.GetBool() && !gameLocal.isMultiplayer;
+	return OpenQ4_TurboModeActive();
 }
 
 rvVehicleAnimated::rvVehicleAnimated ( void ) {

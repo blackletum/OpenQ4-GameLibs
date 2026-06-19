@@ -6,7 +6,7 @@
 #include "Projectile.h"
 
 static float OpenQ4_TurboVehicleTopSpeed( float speed ) {
-	return ( g_turboMode.GetBool() && !gameLocal.isMultiplayer ) ? speed * OPENQ4_TURBO_VEHICLE_SPEED_SCALE : speed;
+	return OpenQ4_TurboModeActive() ? speed * OPENQ4_TURBO_VEHICLE_SPEED_SCALE : speed;
 }
 
 /*

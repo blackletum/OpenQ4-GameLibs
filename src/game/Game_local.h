@@ -950,7 +950,7 @@ public:
 	bool					IsTeamPowerups( void );
 
 	// twhitaker: needed this for difficulty settings
-	float					GetDifficultyModifier( void ) { const static float difficulty[] = { -0.3f, 0.0f, 0.4f, 0.8f, 1.2f }; return difficulty[ idMath::ClampInt( 0, 4, g_skill.GetInteger() ) ]; }
+	float					GetDifficultyModifier( void ) { const static float difficulty[] = { -0.3f, 0.0f, 0.4f, 0.8f, 1.8f }; const int maxDifficulty = ( sizeof( difficulty ) / sizeof( difficulty[ 0 ] ) ) - 1; return difficulty[ idMath::ClampInt( 0, maxDifficulty, g_skill.GetInteger() ) ]; }
 
 	bool					IsMultiplayer( void ) { return isMultiplayer; }
 
@@ -1257,6 +1257,7 @@ private:
 //============================================================================
 
 extern idGameLocal			gameLocal;
+bool						OpenQ4_TurboModeActive( void );
 // RAVEN BEGIN
 // jsinger: animationLib changed to a pointer to prevent it from allocating memory
 //          before the unified allocator is initialized

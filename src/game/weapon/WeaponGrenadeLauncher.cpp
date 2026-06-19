@@ -107,7 +107,7 @@ stateResult_t rvWeaponGrenadeLauncher::State_Idle( const stateParms_t& parms ) {
 				SetState ( "Lower", 4 );
 				return SRESULT_DONE;
 			}		
-			if ( !clipSize ) {
+			if ( !ClipSize() ) {
 				if ( wsfl.attack && AmmoAvailable ( ) ) {
 					SetState ( "Fire", 0 );
 					return SRESULT_DONE;

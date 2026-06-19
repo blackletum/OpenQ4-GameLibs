@@ -17,7 +17,7 @@ CLASS_DECLARATION( rvVehicle, rvVehicleSpline )
 END_CLASS
 
 static float OpenQ4_TurboVehicleTopSpeed( float speed ) {
-	return ( g_turboMode.GetBool() && !gameLocal.isMultiplayer ) ? speed * OPENQ4_TURBO_VEHICLE_SPEED_SCALE : speed;
+	return OpenQ4_TurboModeActive() ? speed * OPENQ4_TURBO_VEHICLE_SPEED_SCALE : speed;
 }
 
 rvVehicleSpline::rvVehicleSpline ( void ) {

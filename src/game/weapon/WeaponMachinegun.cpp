@@ -190,7 +190,7 @@ stateResult_t rvWeaponMachinegun::State_Idle( const stateParms_t& parms ) {
 			if ( fireHeld && !wsfl.attack ) {
 				fireHeld = false;
 			}
-			if ( !clipSize ) {
+			if ( !ClipSize() ) {
 				if ( !fireHeld && gameLocal.time > nextAttackTime && wsfl.attack && AmmoAvailable ( ) ) {
 					SetState ( "Fire", 0 );
 					return SRESULT_DONE;

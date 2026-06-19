@@ -352,7 +352,7 @@ stateResult_t WeaponNapalmGun::State_Idle( const stateParms_t& parms ) {
 				return SRESULT_DONE;
 			}
 
-			if(!clipSize)
+			if(!ClipSize())
 			{
 				if ( gameLocal.time > nextAttackTime && wsfl.attack && AmmoAvailable ( ) ) {
 					SetState ( "Fire", 0 );

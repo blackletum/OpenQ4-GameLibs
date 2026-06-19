@@ -2116,10 +2116,14 @@ void idAI::UpdateEnemy ( void ) {
 	// Skill level 1: (1.0 - 1.25)
 	// Skill level 2: (1.0 - 1.5)
 	// Skill level 3: (1.0 - 1.75)
-	// Skill level 4: (1.0 - 2.0)
+	// Skill level 4: (1.0 - 2.0), with pressure starting farther out
 	if ( combat.aggressiveRange > 0.0f ) {
+		float aggressiveRange = combat.aggressiveRange;
+		if ( g_skill.GetInteger() >= MAX_SKILL_LEVELS - 1 ) {
+			aggressiveRange *= 1.5f;
+		}
 		combat.aggressiveScale = (g_skill.GetFloat() / ( MAX_SKILL_LEVELS - 1 ));
-		combat.aggressiveScale *= 1.0f - idMath::ClampFloat ( 0.0f, 1.0f, enemy.range / combat.aggressiveRange );
+		combat.aggressiveScale *= 1.0f - idMath::ClampFloat ( 0.0f, 1.0f, enemy.range / aggressiveRange );
 		combat.aggressiveScale += 1.0f;
 	}
 }

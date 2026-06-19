@@ -16,7 +16,7 @@
 //#include "../renderer/tr_local.h"
 
 static bool OpenQ4_TurboWeaponReloadsDisabled( void ) {
-	return g_turboMode.GetBool() && !gameLocal.isMultiplayer;
+	return OpenQ4_TurboModeActive();
 }
 
 int rvWeapon::GetFirstPersonShadowSuppressLightId( void ) const {

@@ -603,7 +603,7 @@ stateResult_t rvWeaponNailgun::State_Idle( const stateParms_t& parms ) {
 				return SRESULT_DONE;
 			}
 		
-			if ( !clipSize ) {
+			if ( !ClipSize() ) {
 				if ( gameLocal.time > nextAttackTime && wsfl.attack && AmmoAvailable ( ) ) {
 					SetState ( "Fire", 0 );
 					return SRESULT_DONE;
@@ -693,7 +693,7 @@ stateResult_t rvWeaponNailgun::State_Fire( const stateParms_t& parms ) {
 			return SRESULT_WAIT;
 			
 		case STAGE_DONE:
-			if ( clipSize && wsfl.attack && !wsfl.lowerWeapon && !wsfl.reload ) {
+			if ( ClipSize() && wsfl.attack && !wsfl.lowerWeapon && !wsfl.reload ) {
 				PlayCycle ( ANIMCHANNEL_LEGS, "spinempty", 4 );
 				return SRESULT_STAGE ( STAGE_SPINEMPTY );
 			}
