@@ -16,6 +16,10 @@
 // RAVEN END
 class ThreadedAlloc;		// class that is only used to expand the AutoCrit template to tag allocs/frees called from inside the R_AddModelSurfaces call graph
 
+#if defined( __APPLE__ ) && !defined( MACOS_X )
+#define MACOS_X 1
+#endif
+
 
 //-----------------------------------------------------
 // RAVEN BEGIN
@@ -146,8 +150,6 @@ class ThreadedAlloc;		// class that is only used to expand the AutoCrit template
 
 // for offsetof
 #include <stddef.h>
-
-#include <ppc_intrinsics.h>		// for square root estimate instruction
 #include <limits.h>
 #include <float.h>				// for FLT_MIN
 

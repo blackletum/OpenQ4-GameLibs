@@ -1,20 +1,42 @@
 py = import('python').find_installation(required : true)
 cpp = meson.get_compiler('cpp')
 
-if host_machine.system() != 'windows'
-  error('openQ4-GameLibs Meson build currently targets Windows only.')
-endif
-
-if cpp.get_id() != 'msvc'
-  error('openQ4-GameLibs Meson build requires MSVC cl.exe.')
-endif
-
+host_system = host_machine.system()
 host_cpu_family = host_machine.cpu_family()
-if not ['x86', 'x86_64'].contains(host_cpu_family)
-  error('openQ4-GameLibs Meson build currently supports x86 and x64 MSVC toolchains.')
+is_windows = host_system == 'windows'
+is_darwin = host_system == 'darwin'
+is_msvc = cpp.get_id() == 'msvc'
+
+if not is_windows and not is_darwin
+  error('openQ4-GameLibs Meson build currently supports Windows/MSVC and macOS/Clang bring-up.')
 endif
 
-game_arch = host_cpu_family == 'x86_64' ? 'x64' : 'x86'
+if is_windows and not is_msvc
+  error('openQ4-GameLibs Windows builds require MSVC cl.exe.')
+endif
+
+if is_darwin and cpp.get_id() != 'clang'
+  error('openQ4-GameLibs macOS builds require Clang.')
+endif
+
+if is_windows and not ['x86', 'x86_64'].contains(host_cpu_family)
+  error('openQ4-GameLibs Windows builds currently support x86 and x64 MSVC toolchains.')
+endif
+
+if is_darwin and not ['x86_64', 'aarch64'].contains(host_cpu_family)
+  error('openQ4-GameLibs macOS builds currently support x64 and arm64 Clang toolchains.')
+endif
+
+if host_cpu_family == 'x86_64'
+  game_arch = 'x64'
+elif host_cpu_family == 'x86'
+  game_arch = 'x86'
+elif host_cpu_family == 'aarch64'
+  game_arch = 'arm64'
+else
+  error('Unsupported game module architecture: ' + host_cpu_family)
+endif
+
 sp_module_name = 'game-sp_' + game_arch
 mp_module_name = 'game-mp_' + game_arch
 
@@ -23,37 +45,75 @@ source_root = meson.current_source_dir()
 release_like = ['release', 'debugoptimized', 'minsize'].contains(get_option('buildtype'))
 source_inc = include_directories('.')
 
-common_cpp_args = [
-  '/W4',
-  '/FS',
-  '/source-charset:windows-1252',
-  '/execution-charset:windows-1252',
-  '/Zc:strictStrings-',
-  '/wd4091',
-  '/wd4456',
-  '/wd4457',
-  '/wd4458',
-  '/wd4459',
-  '/wd4595',
-  '/wd4996',
-  '/wd4702',
-  '/wd4740',
-  '/wd4750',
-]
+common_cpp_args = []
+if is_msvc
+  common_cpp_args += [
+    '/std:c++17',
+    '/W4',
+    '/FS',
+    '/source-charset:windows-1252',
+    '/execution-charset:windows-1252',
+    '/Zc:strictStrings-',
+    '/Zc:ternary-',
+    '/wd4091',
+    '/wd4456',
+    '/wd4457',
+    '/wd4458',
+    '/wd4459',
+    '/wd4595',
+    '/wd4996',
+    '/wd4702',
+    '/wd4740',
+    '/wd4750',
+  ]
+else
+  if not cpp.has_argument('-std=c++17')
+    error('openQ4-GameLibs macOS builds require C++17 compiler support.')
+  endif
+  common_cpp_args += ['-std=c++17']
 
-game_forced_include = '/FI' + join_paths(meson.current_source_dir(), 'idlib', 'precompiled.h')
+  foreach compiler_arg : [
+    '-fpermissive',
+    '-finput-charset=windows-1252',
+    '-Wno-invalid-source-encoding',
+    '-Wno-deprecated-declarations',
+    '-Wno-writable-strings',
+  ]
+    if cpp.has_argument(compiler_arg)
+      common_cpp_args += compiler_arg
+    endif
+  endforeach
+endif
+
+game_forced_include_args = is_msvc ? [
+  '/FI' + join_paths(meson.current_source_dir(), 'idlib', 'precompiled.h')
+] : [
+  '-include',
+  join_paths(meson.current_source_dir(), 'idlib', 'precompiled.h')
+]
 
 mssdk_include = get_option('mssdk_include')
 if mssdk_include != ''
-  common_cpp_args += ['/I' + join_paths(meson.current_source_dir(), mssdk_include)]
+  if is_msvc
+    common_cpp_args += ['/I' + join_paths(meson.current_source_dir(), mssdk_include)]
+  else
+    common_cpp_args += ['-I' + join_paths(meson.current_source_dir(), mssdk_include)]
+  endif
 endif
 
 common_defines = [
   'Q4SDK',
-  '_WINDOWS',
-  'WIN32',
   'USE_OPENAL',
 ]
+
+if is_windows
+  common_defines += [
+    '_WINDOWS',
+    'WIN32',
+  ]
+elif is_darwin
+  common_defines += ['MACOS_X=1']
+endif
 
 if release_like
   common_defines += ['NDEBUG']
@@ -61,21 +121,27 @@ else
   common_defines += ['_DEBUG']
 endif
 
-if get_option('inline_debug') and not release_like
+inline_debug_enabled = get_option('inline_debug') and not release_like
+if inline_debug_enabled
   common_defines += ['_INLINEDEBUG']
-  common_cpp_args += ['/Ob1']
+  if is_msvc
+    common_cpp_args += ['/Ob1']
+  endif
 endif
 
+define_arg_prefix = is_msvc ? '/D' : '-D'
 common_define_args = []
 foreach define : common_defines
-  common_define_args += '/D' + define
+  common_define_args += define_arg_prefix + define
 endforeach
+game_dll_define_arg = define_arg_prefix + 'GAME_DLL'
+game_mpapi_define_arg = define_arg_prefix + 'GAME_MPAPI'
 
 idlib_excludes = [
   'idlib/math/Simd_AltiVec.cpp',
 ]
 
-if host_cpu_family == 'x86_64'
+if host_cpu_family != 'x86'
   idlib_excludes += [
     'idlib/math/Simd_3DNow.cpp',
     'idlib/math/Simd_MMX.cpp',
@@ -106,30 +172,43 @@ idlib = static_library(
   'idLib',
   idlib_sources,
   include_directories : source_inc,
-  cpp_args : common_cpp_args + common_define_args + ['/DGAME_DLL'],
+  cpp_args : common_cpp_args + common_define_args + [game_dll_define_arg],
+  pic : not is_windows,
   install : false,
 )
 
-module_link_args = [
-  '/FIXED:NO',
-  '/LARGEADDRESSAWARE',
-]
-
-if host_cpu_family == 'x86_64'
-  module_link_args += ['/BASE:0x180000000']
-else
-  module_link_args += ['/BASE:0x20000000']
-endif
-
-if release_like
-  module_link_args += [
-    '/STACK:4194304',
-    '/OPT:REF',
-    '/OPT:ICF',
-    '/MAP',
+module_link_args = []
+if is_windows
+  module_link_args = [
+    '/FIXED:NO',
+    '/LARGEADDRESSAWARE',
   ]
-else
-  module_link_args += ['/STACK:16000000,16000000']
+
+  if host_cpu_family == 'x86_64'
+    module_link_args += ['/BASE:0x180000000']
+  else
+    module_link_args += ['/BASE:0x20000000']
+  endif
+
+  if release_like
+    module_link_args += [
+      '/STACK:4194304',
+      '/OPT:REF',
+      '/OPT:ICF',
+      '/MAP',
+    ]
+  else
+    module_link_args += ['/STACK:16000000,16000000']
+  endif
+elif is_darwin
+  foreach link_arg : [
+    '-Wl,-dead_strip',
+    '-Wl,-headerpad_max_install_names',
+  ]
+    if cpp.has_link_argument(link_arg)
+      module_link_args += link_arg
+    endif
+  endforeach
 endif
 
 if get_option('build_spgame')
@@ -151,17 +230,31 @@ if get_option('build_spgame')
     endif
   endforeach
 
-  shared_module(
-    sp_module_name,
-    game_sources,
-    include_directories : source_inc,
-    link_with : idlib,
-    cpp_args : common_cpp_args + common_define_args + ['/DGAME_DLL', game_forced_include],
-    link_args : module_link_args,
-    vs_module_defs : 'game/game.def',
-    name_prefix : '',
-    install : false,
-  )
+  if is_windows
+    shared_module(
+      sp_module_name,
+      game_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [game_dll_define_arg] + game_forced_include_args,
+      link_args : module_link_args,
+      vs_module_defs : 'game/game.def',
+      name_prefix : '',
+      install : false,
+    )
+  elif is_darwin
+    shared_module(
+      sp_module_name,
+      game_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [game_dll_define_arg] + game_forced_include_args,
+      link_args : module_link_args + ['-Wl,-install_name,@loader_path/' + sp_module_name + '.dylib'],
+      name_prefix : '',
+      name_suffix : 'dylib',
+      install : false,
+    )
+  endif
 endif
 
 if get_option('build_mpgame')
@@ -183,30 +276,49 @@ if get_option('build_mpgame')
     endif
   endforeach
 
-  shared_module(
-    mp_module_name,
-    mpgame_sources,
-    include_directories : source_inc,
-    link_with : idlib,
-    cpp_args : common_cpp_args + common_define_args + [
-      '/DGAME_DLL',
-      '/DGAME_MPAPI',
-      game_forced_include,
-    ],
-    link_args : module_link_args,
-    vs_module_defs : 'mpgame/mpgame.def',
-    name_prefix : '',
-    install : false,
-  )
+  if is_windows
+    shared_module(
+      mp_module_name,
+      mpgame_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [
+        game_dll_define_arg,
+        game_mpapi_define_arg,
+      ] + game_forced_include_args,
+      link_args : module_link_args,
+      vs_module_defs : 'mpgame/mpgame.def',
+      name_prefix : '',
+      install : false,
+    )
+  elif is_darwin
+    shared_module(
+      mp_module_name,
+      mpgame_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [
+        game_dll_define_arg,
+        game_mpapi_define_arg,
+      ] + game_forced_include_args,
+      link_args : module_link_args + ['-Wl,-install_name,@loader_path/' + mp_module_name + '.dylib'],
+      name_prefix : '',
+      name_suffix : 'dylib',
+      install : false,
+    )
+  endif
 endif
 
 summary(
   {
+    'Host system': host_system,
+    'Host cpu family': host_cpu_family,
+    'Compiler': cpp.get_id(),
     'Build Type': get_option('buildtype'),
     'Build SP Game': get_option('build_spgame'),
     'Build MP Game': get_option('build_mpgame'),
     'Game Module Arch': game_arch,
-    'Inline Debug': get_option('inline_debug') and not release_like,
+    'Inline Debug': inline_debug_enabled,
     'Legacy Include': mssdk_include == '' ? '(disabled)' : mssdk_include,
   },
   section : 'openQ4-GameLibs',

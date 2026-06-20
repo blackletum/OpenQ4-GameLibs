@@ -1,0 +1,147 @@
+name: Commit Validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openq4-gamelibs-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  script-smoke:
+    name: Script Smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Run static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/macos_meson_contract.py tools/tests/source_input_contract.py
+          python tools/tests/macos_meson_contract.py
+          python tools/tests/source_input_contract.py
+          python src/buildscripts/list_sources.py src idlib idlib/math/Simd_AltiVec.cpp >/dev/null
+
+  windows-x64:
+    name: Windows x64 GameLibs
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      OPENQ4_GAMELIBS_VS_TARGET_ARCH: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Meson and Ninja
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install meson ninja
+
+      - name: Run static checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/macos_meson_contract.py tools/tests/source_input_contract.py
+          python tools/tests/macos_meson_contract.py
+          python tools/tests/source_input_contract.py
+
+      - name: Build game libraries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/build/meson_setup.ps1 setup --wipe builddir . --backend ninja --buildtype debugoptimized --vsenv
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/build/meson_setup.ps1 compile -C builddir
+
+      - name: Validate Windows outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($module in @("game-sp_x64.dll", "game-mp_x64.dll")) {
+            $path = Join-Path $PWD "builddir/src/$module"
+            if (-not (Test-Path $path)) {
+              throw "Missing expected Windows game module: $path"
+            }
+          }
+
+  macos-arm64:
+    name: macOS ARM64 GameLibs
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Meson and Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install meson ninja
+
+      - name: Run static checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/macos_meson_contract.py tools/tests/source_input_contract.py
+          python tools/tests/macos_meson_contract.py
+          python tools/tests/source_input_contract.py
+
+      - name: Build game libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          meson setup --wipe builddir . --backend ninja --buildtype debugoptimized
+          meson compile -C builddir
+
+      - name: Validate macOS outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64) module_arch="arm64" ;;
+            x86_64) module_arch="x64" ;;
+            *)
+              echo "Unsupported macOS CI architecture: $(uname -m)"
+              exit 1
+              ;;
+          esac
+
+          for module in "game-sp_${module_arch}.dylib" "game-mp_${module_arch}.dylib"; do
+            path="builddir/src/${module}"
+            if [[ ! -f "${path}" ]]; then
+              echo "Missing expected macOS game module: ${path}"
+              exit 1
+            fi
+
+            install_name="$(otool -D "${path}" | tail -n +2 | tr -d '[:space:]')"
+            expected="@loader_path/${module}"
+            if [[ "${install_name}" != "${expected}" ]]; then
+              echo "Unexpected install name for ${module}: ${install_name}"
+              echo "Expected: ${expected}"
+              exit 1
+            fi
+          done

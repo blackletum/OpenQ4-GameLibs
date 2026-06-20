@@ -6848,6 +6848,25 @@ Searches nearby locations
 
 /*
 ================
+Player_HasInteractiveGui
+================
+*/
+static bool Player_HasInteractiveGui( const renderEntity_t *renderEntity ) {
+	if ( renderEntity == NULL ) {
+		return false;
+	}
+
+	for ( int guiIndex = 0; guiIndex < MAX_RENDERENTITY_GUI; guiIndex++ ) {
+		if ( renderEntity->gui[ guiIndex ] != NULL && renderEntity->gui[ guiIndex ]->IsInteractive() ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/*
+================
 idPlayer::UpdateFocus
 
 Searches nearby entities for interactive guis, possibly making one of them
@@ -7324,7 +7343,7 @@ void idPlayer::UpdateFocus( void ) {
 			}
 		}
 
-		if ( !ent->GetRenderEntity() || !ent->GetRenderEntity()->gui[ 0 ] || !ent->GetRenderEntity()->gui[ 0 ]->IsInteractive() ) {
+		if ( !Player_HasInteractiveGui( ent->GetRenderEntity() ) ) {
 			continue;
 		}
 
@@ -7354,12 +7373,14 @@ void idPlayer::UpdateFocus( void ) {
 			// All focused guis get brackets
 			focusBrackets = ui;
 
+			const float guiFocusLength = ( end - start ).LengthFast() * pt.fraction;
+
 			// Any GUI that is too far away will just get bracket focus so the player can still shoot 
 			// but still see which guis are interractive
-			if ( focusLength > 300.0f ) {
+			if ( guiFocusLength > 300.0f ) {
 				ClearFocus ( );
 				break;
-			} else if ( focusLength > 80.0f ) {
+			} else if ( guiFocusLength > 80.0f ) {
 				ClearFocus ( );
 				focusType = FOCUS_BRACKETS;
 #ifdef _XENON

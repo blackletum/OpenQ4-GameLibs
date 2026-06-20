@@ -115,6 +115,7 @@ void rvNormalizeProjectedRenderLight( renderLight_t &light, const char *ownerNam
 
 idCVar g_airdefense1SkipProbe( "g_airdefense1SkipProbe", "0", CVAR_GAME | CVAR_BOOL, "temporary: auto-skip airdefense1 after one second using the ESC cinematic-skip path, log intro-to-spawn timings, and quit one frame after the player becomes live" );
 idCVar g_airdefense1SkipProbeProfile( "g_airdefense1SkipProbeProfile", "0", CVAR_GAME | CVAR_BOOL, "temporary: when g_airdefense1SkipProbe is enabled, collect coarse skip profiling buckets and top entity think totals" );
+idCVar g_openQ4Convoy2bNoActors( "g_openQ4Convoy2bNoActors", "0", CVAR_GAME | CVAR_BOOL, "openQ4 debug: suppress actor spawns on convoy2b for the unlocked hovertank launch variant" );
 
 static const int OPENQ4_AIRDEFENSE1_SKIP_PROBE_ENTITY_STAT_CAP = 64;
 static const int OPENQ4_AIRDEFENSE1_SKIP_PROBE_TOP_ENTITY_COUNT = 5;
@@ -325,6 +326,49 @@ bool OpenQ4_TurboModeActive( void ) {
 		return false;
 	}
 	return g_turboMode.GetBool() || ( cvarSystem != NULL && cvarSystem->GetCVarBool( "g_turboMode" ) );
+}
+
+static bool OpenQ4_IsConvoy2bActorClassname( const char *classname ) {
+	if ( classname == NULL || classname[0] == '\0' ) {
+		return false;
+	}
+
+	if ( idStr::FindText( classname, "monster_" ) >= 0 ) {
+		return true;
+	}
+	if ( idStr::Icmpn( classname, "char_marinehead", 15 ) == 0 ) {
+		return false;
+	}
+	if ( idStr::Icmpn( classname, "char_", 5 ) == 0 ) {
+		return true;
+	}
+	if ( idStr::Icmpn( classname, "npc_", 4 ) == 0 ) {
+		return true;
+	}
+	if ( idStr::Icmpn( classname, "ai_", 3 ) == 0 ) {
+		return true;
+	}
+	if ( idStr::Icmp( classname, "func_vehicle_driver" ) == 0 ) {
+		return true;
+	}
+	if ( idStr::Icmp( classname, "ai_vehicle_driver" ) == 0 ) {
+		return true;
+	}
+
+	return false;
+}
+
+static bool OpenQ4_ShouldSuppressConvoy2bActorSpawn( const idDict &spawnArgs ) {
+	const bool noActorsEnabled = g_openQ4Convoy2bNoActors.GetBool() ||
+		( cvarSystem != NULL && cvarSystem->GetCVarBool( "g_openQ4Convoy2bNoActors" ) );
+	if ( !noActorsEnabled ) {
+		return false;
+	}
+	if ( gameLocal.mapFileNameStripped.Icmp( "convoy2b" ) != 0 ) {
+		return false;
+	}
+
+	return OpenQ4_IsConvoy2bActorClassname( spawnArgs.GetString( "classname" ) );
 }
 
 const char *idGameLocal::sufaceTypeNames[ MAX_SURFACE_TYPES ] = {
@@ -6052,6 +6096,10 @@ bool idGameLocal::SpawnEntityDef( const idDict &args, idEntity **ent, bool setDe
 
 	spawnArgs.SetDefaults( &def->dict );
 
+	if ( OpenQ4_ShouldSuppressConvoy2bActorSpawn( spawnArgs ) ) {
+		return false;
+	}
+
 // RAVEN BEGIN
 // rjohnson: entity usage stats
 	if ( g_keepEntityStats.GetBool() ) {
@@ -6226,6 +6274,10 @@ bool idGameLocal::InhibitEntitySpawn( idDict &spawnArgs ) {
 		}
 	}
 // RAVEN END
+
+	if ( OpenQ4_ShouldSuppressConvoy2bActorSpawn( spawnArgs ) ) {
+		return true;
+	}
 
 // RITUAL BEGIN
 // squirrel: suppress ents that aren't supported in Buying modes (if that's the mode we're in)

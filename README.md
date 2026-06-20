@@ -4,7 +4,7 @@ Quake 4 game libraries maintained for use with the openQ4 engine project.
 
 ## Overview
 openQ4-GameLibs contains Quake4SDK-derived single-player and multiplayer game library code, maintained with a compatibility-first focus for modern development workflows.
-This repository is the canonical home for SDK/game-library source used by the openQ4 workspace.
+This repository is the canonical source-input repository for SDK/game-library code used by the openQ4 workspace.
 
 ## Included
 - Game library source code in `src/game` and `src/mpgame`
@@ -17,7 +17,7 @@ This repository is the canonical home for SDK/game-library source used by the op
 
 ## Build
 ### Windows (Meson + Ninja)
-Meson/Ninja is the primary and only supported build workflow in this repository.
+Meson/Ninja is the primary standalone developer build workflow in this repository. openQ4's cross-platform engine build consumes this repository as source input and stages the files it needs before compiling the SP/MP modules.
 
 Requirements:
 - Visual Studio C++ toolchain (`cl.exe`); the wrapper selects an x64 target by default on x64 hosts
@@ -35,6 +35,25 @@ The x64 build uses the generic SIMD implementation; the legacy MMX/3DNow/SSE sou
 From openQ4, you can invoke this same flow with:
 `powershell -ExecutionPolicy Bypass -File tools/build/build_gamelibs.ps1`
 
+### macOS (Experimental Meson + Ninja)
+The standalone macOS build path is available for Clang-based x64 and arm64 bring-up. It emits `.dylib` game modules with install names compatible with the openQ4 package layout.
+
+Requirements:
+- Apple Clang from Xcode or the Command Line Tools
+- Meson and Ninja
+
+1. Configure:
+   `meson setup --wipe builddir . --backend ninja --buildtype release`
+2. Build:
+   `meson compile -C builddir`
+3. Outputs:
+   `builddir/src/game-sp_arm64.dylib` and `builddir/src/game-mp_arm64.dylib` on Apple Silicon hosts, or `game-sp_x64.dylib` and `game-mp_x64.dylib` on Intel hosts
+
+The macOS path is intended to match openQ4's staged `baseoq4/` module naming and `@loader_path` install-name policy. Validate gameplay through the companion openQ4 engine checkout before treating a build as release-ready.
+
+### Continuous Integration
+Pull requests and pushes run Linux source-input contract checks plus standalone Windows and macOS CI coverage. Linux CI intentionally verifies this repository's role as source input for openQ4 rather than building standalone Linux modules. The macOS job builds the Clang-based modules and checks that each `.dylib` uses the expected package-relative `@loader_path` install name; the Windows job keeps the MSVC `.dll` flow covered.
+
 ### Useful Configure Options
 - Build single-player only:
   `meson setup builddir -Dbuild_mpgame=false`
@@ -48,7 +67,9 @@ From openQ4, you can invoke this same flow with:
 - Requires user-supplied Quake 4 game data.
 - Companion engine repository: `https://github.com/themuffinator/openQ4`
 - Default local companion path: `..\openQ4` (sibling repo layout).
-- openQ4 build wrappers can invoke this repository directly from `..\openQ4-GameLibs`.
+- openQ4 consumes this repository as source input and stages the files it needs into the engine build tree before compiling SP/MP modules.
+- On Linux, openQ4's staged engine build is the supported path for compiling SP/MP modules from this source input.
+- openQ4 build wrappers can invoke this repository's standalone build as an optional developer convenience.
 
 ## Project Goals
 - Preserve original Quake 4 gameplay behavior.

@@ -2,21 +2,21 @@ option(
   'build_spgame',
   type : 'boolean',
   value : true,
-  description : 'Build the single-player game module (game-sp_<arch>.dll).',
+  description : 'Build the single-player game module (game-sp_<arch>.dll/.dylib).',
 )
 
 option(
   'build_mpgame',
   type : 'boolean',
   value : true,
-  description : 'Build the multiplayer game module (game-mp_<arch>.dll).',
+  description : 'Build the multiplayer game module (game-mp_<arch>.dll/.dylib).',
 )
 
 option(
   'inline_debug',
   type : 'boolean',
   value : false,
-  description : 'Enable legacy DebugInline behavior for debug builds (_INLINEDEBUG + /Ob1).',
+  description : 'Enable legacy DebugInline behavior for debug builds (_INLINEDEBUG, with /Ob1 on MSVC).',
 )
 
 option(

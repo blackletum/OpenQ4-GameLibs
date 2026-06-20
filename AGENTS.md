@@ -36,8 +36,10 @@ This file describes project goals, rules, and upstream credits for anyone workin
 4. Iterate until compatibility and stability targets are met.
 
 **Cross-Repo Workflow (Agent-Only)**
-- openQ4 (`tools/build/meson_setup.ps1`) can trigger this repo's build during openQ4 compile runs when `OPENQ4_BUILD_GAMELIBS=1`.
-- openQ4 `src/game` is treated as a synchronized mirror of `openQ4-GameLibs/src/game`; apply canonical game-library source edits here first.
+- openQ4 (`tools/build/meson_setup.ps1`) can trigger this repo's standalone build during openQ4 compile runs when `OPENQ4_BUILD_GAMELIBS=1`.
+- openQ4 consumes this repository as the canonical source-input repository for SDK/game-library code and stages the files it needs during the engine build.
+- Linux standalone module builds are intentionally not supported here until an explicit cross-repo decision adds them; validate Linux modules through openQ4's staged engine build.
+- Do not maintain or edit an openQ4 `src/game` mirror; apply canonical game-library source edits here first.
 
 **Local References (Agent-Only, Not Included In Repo)**
 - openQ4 engine project: `E:\Repositories\openQ4`

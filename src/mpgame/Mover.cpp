@@ -2173,6 +2173,7 @@ idElevator
 const idEventDef EV_PostArrival( "postArrival", NULL );
 const idEventDef EV_GotoFloor( "gotoFloor", "d" );
 const idEventDef EV_UpdateFloorInfo ( "updateFloorInfo", NULL );
+const idEventDef EV_UpdateStatusGuis( "<updateStatusGuis>", NULL );
 
 CLASS_DECLARATION( idMover, idElevator )
 	EVENT( EV_Activate,				idElevator::Event_Activate )
@@ -2180,6 +2181,7 @@ CLASS_DECLARATION( idMover, idElevator )
 	EVENT( EV_PostArrival,			idElevator::Event_PostFloorArrival )
 	EVENT( EV_GotoFloor,			idElevator::Event_GotoFloor )
 	EVENT( EV_Touch,				idElevator::Event_Touch )
+	EVENT( EV_UpdateStatusGuis,		idElevator::Event_UpdateStatusGuis )
 	EVENT( EV_UpdateFloorInfo,		idElevator::Event_UpdateFloorInfo )
 END_CLASS
 
@@ -2493,10 +2495,6 @@ idElevator::HandleSingleGuiCommand
 bool idElevator::HandleSingleGuiCommand( idEntity *entityGui, idLexer *src ) {
 	idToken token;
 
-	if ( controlsDisabled ) {
-		return false;
-	}
-
 	if ( !src->ReadToken( &token ) ) {
 		return false;
 	}
@@ -2507,6 +2505,10 @@ bool idElevator::HandleSingleGuiCommand( idEntity *entityGui, idLexer *src ) {
 
 	if ( token.Icmp( "changefloor" ) == 0 ) {
 		if ( src->ReadToken( &token ) ) {
+			if ( controlsDisabled ) {
+				PostEventMS( &EV_UpdateStatusGuis, 100 );
+				return true;
+			}
 // RAVEN BEGIN
 // bdube: up and down floor commands
 			int newFloor;
@@ -2519,10 +2521,16 @@ bool idElevator::HandleSingleGuiCommand( idEntity *entityGui, idLexer *src ) {
 			}
 // RAVEN END
 			
+			if ( !GetFloorInfo( newFloor ) ) {
+				PostEventMS( &EV_UpdateStatusGuis, 100 );
+				return true;
+			}
+
 			if ( newFloor == currentFloor ) {
 				// open currentFloor and interior doors
 				OpenInnerDoor();
 				OpenFloorDoor( currentFloor );
+				PostEventMS( &EV_UpdateStatusGuis, 100 );
 			} else {
 				idDoor *door = GetDoor( spawnArgs.GetString( "innerdoor" ) );
 				if ( door && door->IsOpen() ) {
@@ -2533,6 +2541,8 @@ bool idElevator::HandleSingleGuiCommand( idEntity *entityGui, idLexer *src ) {
 			}
 			return true;
 		}
+		PostEventMS( &EV_UpdateStatusGuis, 100 );
+		return true;
 	}
 
 	src->UnreadToken( &token );
@@ -2635,6 +2645,8 @@ void idElevator::Event_GotoFloor( int floor ) {
 		CloseAllDoors();
 		state = WAITING_ON_DOORS;
 		pendingFloor = floor;
+	} else {
+		PostEventMS( &EV_UpdateStatusGuis, 100 );
 	}
 }
 
@@ -2707,6 +2719,15 @@ void idElevator::Event_PostFloorArrival() {
 	if ( returnTime > 0.0f && returnFloor != currentFloor ) {
 		PostEventSec( &EV_GotoFloor, returnTime, returnFloor );
 	}
+}
+
+/*
+================
+idElevator::Event_UpdateStatusGuis
+================
+*/
+void idElevator::Event_UpdateStatusGuis() {
+	UpdateStatusGuis();
 }
 
 /*

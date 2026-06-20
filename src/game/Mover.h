@@ -357,6 +357,7 @@ private:
 	void					Event_Activate			( idEntity *activator );
 	void					Event_PostFloorArrival	( void );
 	void					Event_GotoFloor			( int floor );
+	void					Event_UpdateStatusGuis	( void );
 	void					Event_UpdateFloorInfo	( void );
 };
 
