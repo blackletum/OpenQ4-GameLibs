@@ -590,7 +590,22 @@ bool rvMonsterBossMakron::CheckActions ( void ) {
 
 	//if in the middle of teleporting, do nothing
 	if( flagTeleporting )	{
-		return true;
+		float teleportTime = MS2SEC( gameLocal.time ) - facingTime;
+		if( facingTime > 0.0f && teleportTime >= 0.0f && teleportTime <= 5.0f )	{
+			return true;
+		}
+
+		gameLocal.Warning( "Makron teleport did not complete; forcing recovery." );
+		if( IsHidden() )	{
+			Show();
+		}
+		flagTeleporting = false;
+		facingTime = 0.0f;
+		patternedMode = true;
+		noIdle = true;
+		if( !flagUndying )	{
+			aifl.undying = false;
+		}
 	}
 
 	//gameLocal.Printf("Begin CheckActions \n");		
@@ -1164,6 +1179,15 @@ rvMonsterBossMakron::Event_EnablePatternMode
 void rvMonsterBossMakron::Event_EnablePatternMode( void )	{
 	patternedMode = true;
 	noIdle = true;
+	if( flagTeleporting )	{
+		if( IsHidden() )	{
+			Show();
+		}
+		if( !flagUndying )	{
+			aifl.undying = false;
+		}
+		facingTime = 0.0f;
+	}
 	flagTeleporting = false;
 }
 
@@ -1786,6 +1810,9 @@ stateResult_t rvMonsterBossMakron::State_Torso_RotateToAngle ( const stateParms_
 	
 	float facingTimeDelta;
 	float turnYaw;
+	float turnYawAbs;
+	float turnStep;
+	float currentTime;
 
 	switch ( parms.stage ) {
 		case STAGE_INIT:
@@ -1799,15 +1826,41 @@ stateResult_t rvMonsterBossMakron::State_Torso_RotateToAngle ( const stateParms_
 			aifl.scripted = false;
 			return SRESULT_DONE;
 		case STAGE_WAIT_LOOP:
+			currentTime = MS2SEC( gameLocal.time );
 			turnYaw = idMath::AngleNormalize180 ( facingIdealYaw - move.current_yaw ) ;
 			if( turnYaw > 1.0f || turnYaw < -1.0f)	{
-				facingTimeDelta = MS2SEC( gameLocal.time) - facingTime;
+				facingTimeDelta = currentTime - facingTime;
+				facingTime = currentTime;
+				if( facingTimeDelta < 0.0f )	{
+					facingTimeDelta = 0.0f;
+				}
+				if( facingTimeDelta > 0.25f )	{
+					facingTimeDelta = 0.25f;
+				}
 				idAngles ang = GetPhysics()->GetAxis().ToAngles();
-				ang.yaw += ( turnRate * facingTimeDelta );
+				if( turnRate <= 0.0f )	{
+					turnStep = turnYaw;
+				} else if( facingTimeDelta <= 0.0f )	{
+					return SRESULT_STAGE( STAGE_WAIT_LOOP);
+				} else {
+					turnYawAbs = idMath::Abs( turnYaw );
+					turnStep = turnRate * facingTimeDelta;
+					if( turnStep > turnYawAbs )	{
+						turnStep = turnYawAbs;
+					}
+					if( turnYaw < 0.0f )	{
+						turnStep = -turnStep;
+					}
+				}
+				ang.yaw = idMath::AngleNormalize180( ang.yaw + turnStep );
 				SetAngles( ang);
 				move.current_yaw = ang.yaw;
 				return SRESULT_STAGE( STAGE_WAIT_LOOP);	
 			}
+			idAngles ang = GetPhysics()->GetAxis().ToAngles();
+			ang.yaw = idMath::AngleNormalize180( facingIdealYaw );
+			SetAngles( ang );
+			move.current_yaw = ang.yaw;
 			aifl.scripted = false;
 			return SRESULT_DONE;
 	}
@@ -2213,6 +2266,7 @@ stateResult_t rvMonsterBossMakron::Frame_Teleport ( const stateParms_t& parms )	
 
 	//turn on the do-nothing teleport flag
 	flagTeleporting = true;
+	facingTime = MS2SEC( gameLocal.time );
 
 	//call some script.
 	ExecScriptFunction( scriptTeleport );
