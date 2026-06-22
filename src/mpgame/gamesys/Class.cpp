@@ -245,6 +245,26 @@ int		idClass::typeNumBits	= 0;
 int		idClass::memused		= 0;
 int		idClass::numobjects		= 0;
 
+static const int IDCLASS_ALLOC_HEADER_SIZE = 16;
+
+static byte *idClass_AllocBlock( size_t objectSize ) {
+	byte *block;
+	const size_t totalSize = objectSize + IDCLASS_ALLOC_HEADER_SIZE;
+
+	block = static_cast<byte *>( Mem_Alloc16( static_cast<int>( totalSize ), MA_CLASS ) );
+	*reinterpret_cast<int *>( block ) = static_cast<int>( totalSize );
+
+#ifdef ID_DEBUG_MEMORY
+	memset( block + IDCLASS_ALLOC_HEADER_SIZE, 0xcd, objectSize );
+#endif
+
+	return block;
+}
+
+static byte *idClass_BlockFromObject( void *ptr ) {
+	return static_cast<byte *>( ptr ) - IDCLASS_ALLOC_HEADER_SIZE;
+}
+
 /*
 ================
 idClass::CallSpawn
@@ -291,8 +311,9 @@ idClass::FindUninitializedMemory
 */
 void idClass::FindUninitializedMemory( void ) {
 #ifdef ID_DEBUG_MEMORY
-	unsigned long *ptr = ( ( unsigned long * )this ) - 1;
-	int size = *ptr;
+	byte *block = idClass_BlockFromObject( this );
+	dword *ptr = reinterpret_cast<dword *>( this );
+	int size = *reinterpret_cast<int *>( block ) - IDCLASS_ALLOC_HEADER_SIZE;
 	assert( ( size & 3 ) == 0 );
 	size >>= 2;
 	for ( int i = 0; i < size; i++ ) {
@@ -462,53 +483,31 @@ idClass::new
 #endif
 
 void * idClass::operator new( size_t s ) {
-	int *p;
+	byte *p;
+	const size_t totalSize = s + IDCLASS_ALLOC_HEADER_SIZE;
 
-	s += sizeof( int );
 //RAVEN BEGIN
 //amccarthy: Added memory allocation tag
-	p = (int *)Mem_Alloc( s, MA_CLASS );
+	p = idClass_AllocBlock( s );
 //RAVEN END
-	*p = s;
-	memused += s;
+	memused += static_cast<int>( totalSize );
 	numobjects++;
 
-#ifdef ID_DEBUG_MEMORY
-	unsigned long *ptr = (unsigned long *)p;
-	int size = s;
-	assert( ( size & 3 ) == 0 );
-	size >>= 3;
-	for ( int i = 1; i < size; i++ ) {
-		ptr[i] = 0xcdcdcdcd;
-	}
-#endif
-
-	return p + 1;
+	return p + IDCLASS_ALLOC_HEADER_SIZE;
 }
 
 void * idClass::operator new( size_t s, int, int, char *, int ) {
-	int *p;
+	byte *p;
+	const size_t totalSize = s + IDCLASS_ALLOC_HEADER_SIZE;
 
-	s += sizeof( int );
 //RAVEN BEGIN
 //amccarthy: Added memory allocation tag
-	p = (int *)Mem_Alloc( s, MA_CLASS );
+	p = idClass_AllocBlock( s );
 //RAVEN END
-	*p = s;
-	memused += s;
+	memused += static_cast<int>( totalSize );
 	numobjects++;
 
-#ifdef ID_DEBUG_MEMORY
-	unsigned long *ptr = (unsigned long *)p;
-	int size = s;
-	assert( ( size & 3 ) == 0 );
-	size >>= 3;
-	for ( int i = 1; i < size; i++ ) {
-		ptr[i] = 0xcdcdcdcd;
-	}
-#endif
-
-	return p + 1;
+	return p + IDCLASS_ALLOC_HEADER_SIZE;
 }
 
 #ifdef ID_DEBUG_MEMORY
@@ -521,24 +520,24 @@ idClass::delete
 ================
 */
 void idClass::operator delete( void *ptr ) {
-	int *p;
+	byte *p;
 
 	if ( ptr ) {
-		p = ( ( int * )ptr ) - 1;
-		memused -= *p;
+		p = idClass_BlockFromObject( ptr );
+		memused -= *reinterpret_cast<int *>( p );
 		numobjects--;
-        Mem_Free( p );
+        Mem_Free16( p );
 	}
 }
 
 void idClass::operator delete( void *ptr, int, int, char *, int ) {
-	int *p;
+	byte *p;
 
 	if ( ptr ) {
-		p = ( ( int * )ptr ) - 1;
-		memused -= *p;
+		p = idClass_BlockFromObject( ptr );
+		memused -= *reinterpret_cast<int *>( p );
 		numobjects--;
-        Mem_Free( p );
+        Mem_Free16( p );
 	}
 }
 
