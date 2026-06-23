@@ -1156,16 +1156,18 @@ idScriptObject::Save
 ================
 */
 void idScriptObject::Save( idSaveGame *savefile ) const {
-	size_t size;
-
 	if ( type == &type_object && data == NULL ) {
 		// Write empty string for uninitialized object
 		savefile->WriteString( "" );
 	} else {
 		savefile->WriteString( type->Name() );
-		size = type->Size();
-		savefile->WriteInt( size );
-		savefile->Write( data, size );
+		const size_t typeSize = type->Size();
+		const int savedSize = static_cast<int>( typeSize );
+		if ( static_cast<size_t>( savedSize ) != typeSize ) {
+			gameLocal.Error( "idScriptObject::Save: size of object '%s' is too large to save.", type->Name() );
+		}
+		savefile->WriteInt( savedSize );
+		savefile->Write( data, savedSize );
 	}
 }
 
@@ -1176,7 +1178,7 @@ idScriptObject::Restore
 */
 void idScriptObject::Restore( idRestoreGame *savefile ) {
 	idStr typeName;
-	size_t size;
+	int savedSize;
 
 	savefile->ReadString( typeName );
 
@@ -1189,12 +1191,15 @@ void idScriptObject::Restore( idRestoreGame *savefile ) {
 		savefile->Error( "idScriptObject::Restore: failed to restore object of type '%s'.", typeName.c_str() );
 	}
 
-	savefile->ReadInt( (int &)size );
-	if ( size != type->Size() ) {
+	savefile->ReadInt( savedSize );
+	if ( savedSize < 0 ) {
+		savefile->Error( "idScriptObject::Restore: invalid size %d for object '%s'.", savedSize, typeName.c_str() );
+	}
+	if ( static_cast<size_t>( savedSize ) != type->Size() ) {
 		savefile->Error( "idScriptObject::Restore: size of object '%s' doesn't match size in save game.", typeName.c_str() );
 	}
 
-	savefile->Read( data, size );
+	savefile->Read( data, savedSize );
 }
 
 /*
