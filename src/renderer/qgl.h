@@ -15,6 +15,7 @@
 
 // magic flag to keep tiger gl.h from loading glext.h
 #define GL_GLEXT_LEGACY
+#define OPENQ4_MACOS_GLHANDLEARB_PROVIDED_BY_OPENGL
 #include <OpenGL/gl.h>
 
 #elif defined( __linux__ )

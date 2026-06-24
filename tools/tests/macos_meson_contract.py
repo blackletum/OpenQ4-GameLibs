@@ -28,6 +28,8 @@ def main() -> None:
     options = read("meson_options.txt")
     src_meson = read("src/meson.build")
     precompiled = read("src/idlib/precompiled.h")
+    qgl = read("src/renderer/qgl.h")
+    glext = read("src/renderer/glext.h")
     readme = read("README.md")
     workflow = read(".github/workflows/commit-validation.yml")
 
@@ -62,6 +64,8 @@ def main() -> None:
 
     require(precompiled, "#if defined( __APPLE__ ) && !defined( MACOS_X )", "Apple compiler MACOS_X bridge")
     reject(precompiled, "#include <ppc_intrinsics.h>", "modern macOS precompiled header")
+    require(qgl, "#define OPENQ4_MACOS_GLHANDLEARB_PROVIDED_BY_OPENGL", "macOS OpenGL GLhandleARB ownership guard")
+    require(glext, "#ifndef OPENQ4_MACOS_GLHANDLEARB_PROVIDED_BY_OPENGL", "bundled glext macOS GLhandleARB guard")
 
     require(options, "game-sp_<arch>.dll/.dylib", "SP module option description")
     require(options, "game-mp_<arch>.dll/.dylib", "MP module option description")
