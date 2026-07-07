@@ -1577,8 +1577,17 @@ void idAnimated::Restore( idRestoreGame *savefile ) {
 	int		i;
 
 	savefile->ReadInt( num_anims );
+	if ( num_anims < 0 || num_anims > MAX_SAVEGAME_ANIMATED_ANIMS ) {
+		savefile->Error( "idAnimated::Restore: invalid animation count %d", num_anims );
+	}
 	savefile->ReadInt( current_anim_index );
+	if ( current_anim_index < 0 || current_anim_index > num_anims ) {
+		savefile->Error( "idAnimated::Restore: invalid current animation index %d for %d animations", current_anim_index, num_anims );
+	}
 	savefile->ReadInt( anim );
+	if ( anim < 0 || anim > animator.NumAnims() ) {
+		savefile->Error( "idAnimated::Restore: invalid animation handle %d", anim );
+	}
 	savefile->ReadInt( blendFrames );
 	savefile->ReadJoint( soundJoint );
 	activator.Restore( savefile );

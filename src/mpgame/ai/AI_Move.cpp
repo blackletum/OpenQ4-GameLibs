@@ -33,6 +33,8 @@ idMoveState::idMoveState
 =====================
 */
 idMoveState::idMoveState() {
+	memset( &fl, 0, sizeof( fl ) );
+
 	moveType			= MOVETYPE_ANIM;
 	moveCommand			= MOVE_NONE;
 	moveStatus			= MOVE_STATUS_DONE;
@@ -80,9 +82,27 @@ idMoveState::idMoveState() {
 	fly_bob_horz		= 0.0f;
 	currentDirection	= MOVEDIR_FORWARD;
 	idealDirection		= MOVEDIR_FORWARD;		
+	walkRange			= 0.0f;
+	walkTurn			= 0.0f;
+	followRange.Zero();
+	searchRange.Zero();
+	attackPositionRange	= 0.0f;
+	turnDelta			= 0.0f;
 	current_yaw			= 0.0f;
 	ideal_yaw			= 0.0f;
 	flyTiltJoint		= INVALID_JOINT;
+	goalPos.Zero();
+	goalArea			= 0;
+	myPos.Zero();
+	myArea				= 0;
+	seekPos.Zero();
+	for ( int i = 0; i < MAX_PATH_LEN; i++ ) {
+		path[i].reach = NULL;
+		path[i].seekPos.Zero();
+	}
+	pathLen				= 0;
+	pathArea			= 0;
+	pathTime			= 0;
 	addVelocity.Zero();
 }
 
@@ -213,15 +233,16 @@ void idMoveState::Save( idSaveGame *savefile ) const {
 
 	savefile->WriteVec3 ( seekPos );
 
-	savefile->WriteInt( (int) MAX_PATH_LEN );	// cnicholson: Added unsaved vars
-	for (i=0; i< MAX_PATH_LEN; ++i) {
+	const int savedPathLen = ( pathLen >= 0 && pathLen <= MAX_PATH_LEN ) ? pathLen : 0;
+	savefile->WriteInt( savedPathLen );	// cnicholson: Added unsaved vars
+	for (i=0; i< savedPathLen; ++i) {
 		// TOSAVE: idReachability*		reach;
 		savefile->WriteVec3( path[i].seekPos );
 	}
 
-	savefile->WriteInt( pathLen );		// cnicholson: Added unsaved var
-	savefile->WriteInt( pathArea );		// cnicholson: Added unsaved var
-	savefile->WriteInt( pathTime );		// cnicholson: Added unsaved var
+	savefile->WriteInt( savedPathLen );	// cnicholson: Added unsaved var
+	savefile->WriteInt( savedPathLen > 0 ? pathArea : 0 );	// cnicholson: Added unsaved var
+	savefile->WriteInt( savedPathLen > 0 ? pathTime : 0 );	// cnicholson: Added unsaved var
 
 	savefile->WriteVec3( addVelocity );
 }

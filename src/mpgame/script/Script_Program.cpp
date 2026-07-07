@@ -2416,6 +2416,21 @@ bool idProgram::Restore( idRestoreGame *savefile ) {
 	savefile->ReadInt ( top_types );		// cnicholson: Added unrestored var
 	savefile->ReadInt ( top_defs );			// cnicholson: Added unrestored var
 	savefile->ReadInt ( top_files );		// cnicholson: Added unrestored var
+	if ( top_functions < 0 || top_functions > functions.Num() ) {
+		savefile->Error( "idProgram::Restore: invalid function watermark %d for %d functions", top_functions, functions.Num() );
+	}
+	if ( top_statements < 0 || top_statements > statements.Num() ) {
+		savefile->Error( "idProgram::Restore: invalid statement watermark %d for %d statements", top_statements, statements.Num() );
+	}
+	if ( top_types < 0 || top_types > types.Num() ) {
+		savefile->Error( "idProgram::Restore: invalid type watermark %d for %d types", top_types, types.Num() );
+	}
+	if ( top_defs < 0 || top_defs > varDefs.Num() ) {
+		savefile->Error( "idProgram::Restore: invalid vardef watermark %d for %d vardefs", top_defs, varDefs.Num() );
+	}
+	if ( top_files < 0 || top_files > fileList.Num() ) {
+		savefile->Error( "idProgram::Restore: invalid file watermark %d for %d files", top_files, fileList.Num() );
+	}
 
 	int saved_checksum, checksum;
 

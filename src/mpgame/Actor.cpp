@@ -93,6 +93,9 @@ void idAnimState::Restore( idRestoreGame *savefile ) {
 	}
 
 	savefile->ReadInt( channel );
+	if ( channel < ANIMCHANNEL_ALL || channel >= ANIM_NumAnimChannels ) {
+		savefile->Error( "idAnimState::Restore: invalid animation channel %d", channel );
+	}
 	savefile->ReadBool( disabled );
 
 // RAVEN BEGIN
@@ -998,6 +1001,9 @@ void idActor::Restore( idRestoreGame *savefile ) {
 		idAttachInfo &attach = attachments.Alloc();
 		attach.ent.Restore( savefile );
 		savefile->ReadInt( attach.channel );
+		if ( attach.channel < ANIMCHANNEL_ALL || attach.channel >= ANIM_NumAnimChannels ) {
+			savefile->Error( "idActor::Restore: invalid attachment animation channel %d", attach.channel );
+		}
 	}
 
 // RAVEN BEGIN

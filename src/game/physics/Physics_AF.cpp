@@ -6843,7 +6843,9 @@ void idPhysics_AF::Restore( idRestoreGame *saveFile ) {
 	// the articulated figure structure should have already been restored
 
 	saveFile->ReadInt( num );
-	assert( num == bodies.Num() );
+	if ( num != bodies.Num() ) {
+		saveFile->Error( "idPhysics_AF::Restore: articulated body count mismatch %d (expected %d)", num, bodies.Num() );
+	}
 	for ( i = 0; i < bodies.Num(); i++ ) {
 		bodies[i]->Restore( saveFile );
 	}
@@ -6854,7 +6856,9 @@ void idPhysics_AF::Restore( idRestoreGame *saveFile ) {
 	}
 
 	saveFile->ReadInt( num );
-	assert( num == constraints.Num() );
+	if ( num != constraints.Num() ) {
+		saveFile->Error( "idPhysics_AF::Restore: articulated constraint count mismatch %d (expected %d)", num, constraints.Num() );
+	}
 	for ( i = 0; i < constraints.Num(); i++ ) {
 		constraints[i]->Restore( saveFile );
 	}

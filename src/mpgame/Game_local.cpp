@@ -2277,6 +2277,13 @@ bool idGameLocal::InitFromSaveGame( const char *mapName, idRenderWorld *renderWo
 	idRestoreGame savegame( saveGameFile );
 
 	savegame.ReadBuildNumber();
+	if ( !savegame.IsOpenQ4SaveGameCompatible() ) {
+		Warning(
+			"Savegame payload is not compatible with this openQ4 build: %s",
+			savegame.GetOpenQ4SaveGameCompatibilityError() );
+		program.Restart();
+		return false;
+	}
 
 	// Create the list of all objects in the game
 	savegame.CreateObjects();

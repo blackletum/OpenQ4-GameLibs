@@ -505,5 +505,16 @@ void rvClientCrawlEffect::Restore( idRestoreGame *savefile ) {
 	savefile->ReadInt( jointStart );
 	savefile->ReadInt( jointEnd );
 	savefile->ReadInt( crawlDir );
+	if ( numJoints > 0 ) {
+		if ( jointStart < 0 || jointStart >= numJoints ) {
+			savefile->Error( "rvClientCrawlEffect::Restore: invalid crawl start joint index %d for %d joints", jointStart, numJoints );
+		}
+		if ( jointEnd < 0 || jointEnd >= numJoints ) {
+			savefile->Error( "rvClientCrawlEffect::Restore: invalid crawl end joint index %d for %d joints", jointEnd, numJoints );
+		}
+		if ( crawlDir != -1 && crawlDir != 1 ) {
+			savefile->Error( "rvClientCrawlEffect::Restore: invalid crawl direction %d", crawlDir );
+		}
+	}
 	crawlEnt.Restore( savefile );
 }

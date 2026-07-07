@@ -4,6 +4,7 @@
 
 #include "../Game_local.h"
 
+#include "framework/BuildVersion.h"
 #include "NoGameTypeInfo.h"
 
 /*
@@ -41,6 +42,21 @@ file be unloadable in some way (for example, due to script changes).
 static const int MAX_SAVEGAME_OBJECTS = MAX_GENTITIES + MAX_CENTITIES + 4096;
 static const int MAX_SAVEGAME_DICT_ENTRIES = 16384;
 
+static bool SaveGame_IsValidRenderBounds( const idBounds &bounds ) {
+	for ( int i = 0; i < 3; i++ ) {
+		if ( FLOAT_IS_NAN( bounds[0][i] ) || FLOAT_IS_NAN( bounds[1][i] ) ) {
+			return false;
+		}
+		if ( bounds[0][i] > bounds[1][i] ) {
+			return false;
+		}
+		if ( bounds[1][i] - bounds[0][i] >= MAX_BOUND_SIZE ) {
+			return false;
+		}
+	}
+	return true;
+}
+
 class idScopedSaveMemoryFile {
 public:
 	idScopedSaveMemoryFile( void ) {
@@ -72,10 +88,28 @@ idSaveGame::idSaveGame()
 idSaveGame::idSaveGame( idFile *savefile ) {
 
 	file = savefile;
+	openQ4SaveGameNextSyncId = 0;
+	openQ4SaveGameSyncMarkersEnabled = false;
 
 	// Put NULL at the start of the list so we can skip over it.
 	objects.Clear();
 	objects.Append( NULL );
+}
+
+/*
+================
+idSaveGame::WriteChecked
+================
+*/
+void idSaveGame::WriteChecked( int bytesWritten, int expected, const char *detail, int offset ) {
+	if ( expected < 0 ) {
+		common->Error( "idSaveGame: invalid negative write length %d while writing %s",
+			expected, detail ? detail : "data" );
+	}
+	if ( bytesWritten != expected ) {
+		common->Error( "idSaveGame: failed to write %s at offset %d (wrote %d of %d)",
+			detail ? detail : "data", offset, bytesWritten, expected );
+	}
 }
 
 /*
@@ -96,6 +130,7 @@ idSaveGame::Close
 */
 void idSaveGame::Close( void ) {
 	int i;
+	const int numObjects = objects.Num() - 1;
 
 	WriteSoundCommands();
 
@@ -108,6 +143,8 @@ void idSaveGame::Close( void ) {
 // RAVEN END
 		CallSave_r( objects[ i ]->GetType(), objects[ i ] );
 	}
+
+	WriteSaveGameFooter( numObjects );
 
 	objects.Clear();
 
@@ -129,8 +166,14 @@ idSaveGame::WriteObjectList
 void idSaveGame::WriteObjectList( void ) {
 	int i;
 
+	if ( objects.Num() - 1 > MAX_SAVEGAME_OBJECTS ) {
+		common->Error( "idSaveGame::WriteObjectList: invalid object count %d (max %d)", objects.Num() - 1, MAX_SAVEGAME_OBJECTS );
+	}
 	WriteInt( objects.Num() - 1 );
 	for( i = 1; i < objects.Num(); i++ ) {
+		if ( objects[ i ] == NULL ) {
+			common->Error( "idSaveGame::WriteObjectList: NULL object at index %d", i );
+		}
 		WriteString( objects[ i ]->GetClassname() );
 	}
 }
@@ -160,7 +203,13 @@ idSaveGame::AddObject
 ================
 */
 void idSaveGame::AddObject( const idClass *obj ) {
+	if ( obj == NULL ) {
+		return;
+	}
 	objects.AddUnique( obj );
+	if ( objects.Num() - 1 > MAX_SAVEGAME_OBJECTS ) {
+		common->Error( "idSaveGame::AddObject: too many savegame objects (%d, max %d)", objects.Num() - 1, MAX_SAVEGAME_OBJECTS );
+	}
 }
 
 /*
@@ -169,7 +218,12 @@ idSaveGame::WriteSyncId
 ================
 */
 void idSaveGame::WriteSyncId( void ) {
-	file->WriteSyncId();
+	if ( !openQ4SaveGameSyncMarkersEnabled ) {
+		return;
+	}
+
+	WriteInt( OPENQ4_SAVEGAME_SYNC_MAGIC );
+	WriteInt( openQ4SaveGameNextSyncId++ );
 }
 
 /*
@@ -178,7 +232,17 @@ idSaveGame::Write
 ================
 */
 void idSaveGame::Write( const void *buffer, int len ) {
-	file->Write( buffer, len );
+	if ( len < 0 ) {
+		common->Error( "idSaveGame::Write: invalid negative write length %d", len );
+	}
+	if ( len == 0 ) {
+		return;
+	}
+	if ( buffer == NULL ) {
+		common->Error( "idSaveGame::Write: null source for %d byte write", len );
+	}
+	const int offset = file->Tell();
+	WriteChecked( file->Write( buffer, len ), len, "raw data", offset );
 }
 
 /*
@@ -187,7 +251,8 @@ idSaveGame::WriteInt
 ================
 */
 void idSaveGame::WriteInt( const int value ) {
-	file->WriteInt( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteInt( value ), static_cast<int>( sizeof( value ) ), "int", offset );
 }
 
 /*
@@ -196,7 +261,8 @@ idSaveGame::WriteJoint
 ================
 */
 void idSaveGame::WriteJoint( const jointHandle_t value ) {
-	file->WriteInt( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteInt( value ), static_cast<int>( sizeof( int ) ), "joint", offset );
 }
 
 /*
@@ -205,7 +271,8 @@ idSaveGame::WriteShort
 ================
 */
 void idSaveGame::WriteShort( const short value ) {
-	file->WriteShort( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteShort( value ), static_cast<int>( sizeof( value ) ), "short", offset );
 }
 
 /*
@@ -214,7 +281,8 @@ idSaveGame::WriteByte
 ================
 */
 void idSaveGame::WriteByte( const byte value ) {
-	file->WriteUnsignedChar( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteUnsignedChar( value ), static_cast<int>( sizeof( value ) ), "byte", offset );
 }
 
 /*
@@ -223,7 +291,8 @@ idSaveGame::WriteSignedChar
 ================
 */
 void idSaveGame::WriteSignedChar( const signed char value ) {
-	file->WriteChar( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteChar( value ), static_cast<int>( sizeof( value ) ), "signed char", offset );
 }
 
 /*
@@ -232,7 +301,8 @@ idSaveGame::WriteFloat
 ================
 */
 void idSaveGame::WriteFloat( const float value ) {
-	file->WriteFloat( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteFloat( value ), static_cast<int>( sizeof( value ) ), "float", offset );
 }
 
 /*
@@ -241,7 +311,8 @@ idSaveGame::WriteBool
 ================
 */
 void idSaveGame::WriteBool( const bool value ) {
-	file->WriteBool( value );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteBool( value ), static_cast<int>( sizeof( byte ) ), "bool", offset );
 }
 
 /*
@@ -251,6 +322,10 @@ idSaveGame::WriteString
 */
 void idSaveGame::WriteString( const char *string ) {
 	int len;
+
+	if ( string == NULL ) {
+		string = "";
+	}
 
 	len = strlen( string );
 
@@ -262,7 +337,11 @@ void idSaveGame::WriteString( const char *string ) {
 	}
 // RAVEN END
 
-	file->WriteString( string );
+	WriteInt( len );
+	if ( len > 0 ) {
+		const int offset = file->Tell();
+		WriteChecked( file->Write( string, len ), len, "string", offset );
+	}
 }
 
 /*
@@ -271,7 +350,8 @@ idSaveGame::WriteVec2
 ================
 */
 void idSaveGame::WriteVec2( const idVec2 &vec ) {
-	file->WriteVec2( vec );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteVec2( vec ), static_cast<int>( sizeof( vec ) ), "vec2", offset );
 }
 
 /*
@@ -280,7 +360,8 @@ idSaveGame::WriteVec3
 ================
 */
 void idSaveGame::WriteVec3( const idVec3 &vec ) {
-	file->WriteVec3( vec );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteVec3( vec ), static_cast<int>( sizeof( vec ) ), "vec3", offset );
 }
 
 /*
@@ -289,7 +370,8 @@ idSaveGame::WriteVec4
 ================
 */
 void idSaveGame::WriteVec4( const idVec4 &vec ) {
-	file->WriteVec4( vec );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteVec4( vec ), static_cast<int>( sizeof( vec ) ), "vec4", offset );
 }
 
 /*
@@ -298,7 +380,8 @@ idSaveGame::WriteVec5
 ================
 */
 void idSaveGame::WriteVec5( const idVec5 &vec ) {
-	file->WriteVec5( vec );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteVec5( vec ), static_cast<int>( sizeof( vec ) ), "vec5", offset );
 }
 
 /*
@@ -307,7 +390,8 @@ idSaveGame::WriteVec6
 ================
 */
 void idSaveGame::WriteVec6( const idVec6 &vec ) {
-	file->WriteVec6( vec );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteVec6( vec ), static_cast<int>( sizeof( vec ) ), "vec6", offset );
 }
 
 /*
@@ -329,6 +413,9 @@ void idSaveGame::WriteWinding( const idWinding &w )
 {
 	int i, num;
 	num = w.GetNumPoints();
+	if ( num < 0 || num > MAX_POINTS_ON_WINDING ) {
+		common->Error( "idSaveGame::WriteWinding: invalid point count %d", num );
+	}
 	WriteInt( num );
 	for ( i = 0; i < num; i++ ) {
 		WriteVec5( w[i] );
@@ -342,7 +429,8 @@ idSaveGame::WriteMat3
 ================
 */
 void idSaveGame::WriteMat3( const idMat3 &mat ) {
-	file->WriteMat3( mat );
+	const int offset = file->Tell();
+	WriteChecked( file->WriteMat3( mat ), static_cast<int>( sizeof( mat ) ), "mat3", offset );
 }
 
 /*
@@ -405,6 +493,10 @@ void idSaveGame::WriteDict( const idDict *dict ) {
 		WriteInt( -1 );
 	} else {
 		num = dict->GetNumKeyVals();
+		if ( num > MAX_SAVEGAME_DICT_ENTRIES ) {
+			common->Error( "idSaveGame::WriteDict: invalid key/value count %d (max %d)",
+				num, MAX_SAVEGAME_DICT_ENTRIES );
+		}
 		WriteInt( num );
 		for( i = 0; i < num; i++ ) {
 			kv = dict->GetKeyVal( i );
@@ -997,7 +1089,32 @@ idSaveGame::WriteBuildNumber
 ======================
 */
 void idSaveGame::WriteBuildNumber( const int value ) {
+	openQ4SaveGameSyncMarkersEnabled = true;
+	openQ4SaveGameNextSyncId = 0;
+
+	WriteInt( OPENQ4_SAVEGAME_COMPATIBILITY_MAGIC );
+	WriteInt( OPENQ4_SAVEGAME_COMPATIBILITY_VERSION );
 	WriteInt( value );
+	WriteString( OPENQ4_SAVEGAME_COMPAT_SOURCE_HASH );
+	WriteInt( OPENQ4_SAVEGAME_COMPAT_SOURCE_FILE_COUNT );
+}
+
+/*
+======================
+idSaveGame::WriteSaveGameFooter
+======================
+*/
+void idSaveGame::WriteSaveGameFooter( int numObjects ) {
+	if ( !openQ4SaveGameSyncMarkersEnabled ) {
+		return;
+	}
+
+	const int footerOffset = file->Tell();
+	WriteInt( OPENQ4_SAVEGAME_FOOTER_MAGIC );
+	WriteInt( OPENQ4_SAVEGAME_FOOTER_VERSION );
+	WriteInt( footerOffset );
+	WriteInt( numObjects );
+	WriteInt( openQ4SaveGameNextSyncId );
 }
 
 
@@ -1018,6 +1135,15 @@ idRestoreGame::RestoreGame
 */
 idRestoreGame::idRestoreGame( idFile *savefile ) {
 	file = savefile;
+	buildNumber = 0;
+	openQ4SaveGameCompatibilityVersion = 0;
+	openQ4SaveGameCompatibilitySourceFileCount = 0;
+	openQ4SaveGameNextSyncId = 0;
+	openQ4SaveGameHasCompatibilityStamp = false;
+	openQ4SaveGameCompatible = false;
+	openQ4SaveGameSyncMarkersEnabled = false;
+	openQ4SaveGameCompatibilityStamp.Clear();
+	openQ4SaveGameCompatibilityError = "savegame compatibility header has not been read";
 }
 
 /*
@@ -1102,9 +1228,11 @@ void idRestoreGame::RestoreObjects( void ) {
 
 	// restore all the objects
 	for( i = 1; i < objects.Num(); i++ ) {
-		file->ReadSyncId( "Restore objects", objects[ i ]->GetClassname() );
+		ReadSyncId( "Restore objects", objects[ i ]->GetClassname() );
 		CallRestore_r( objects[ i ]->GetType(), objects[ i ] );
 	}
+
+	ReadSaveGameFooter();
 
 	// regenerate render entities and render lights because are not saved
 	for( i = 1; i < objects.Num(); i++ ) {
@@ -1168,9 +1296,47 @@ void idRestoreGame::CallRestore_r( const idTypeInfo *cls, idClass *obj ) {
 		}
 	}
 	
-	file->ReadSyncId( "Callrestore_r start ", cls->classname );
+	ReadSyncId( "Callrestore_r start ", cls->classname );
 	( obj->*cls->Restore )( this );
-	file->ReadSyncId( "Callrestore_r end ", cls->classname );
+	ReadSyncId( "Callrestore_r end ", cls->classname );
+}
+
+/*
+================
+idRestoreGame::ReadSyncId
+================
+*/
+void idRestoreGame::ReadSyncId( const char *detail, const char *classname ) {
+	if ( !openQ4SaveGameSyncMarkersEnabled ) {
+		return;
+	}
+
+	const int offset = file->Tell();
+	int marker;
+	int syncId;
+	ReadInt( marker );
+	ReadInt( syncId );
+
+	if ( marker != OPENQ4_SAVEGAME_SYNC_MAGIC ) {
+		Error( "idRestoreGame::ReadSyncId: marker mismatch while reading %s%s%s at offset %d (got 0x%08x, expected 0x%08x)",
+			detail ? detail : "data",
+			classname ? " for " : "",
+			classname ? classname : "",
+			offset,
+			marker,
+			OPENQ4_SAVEGAME_SYNC_MAGIC );
+	}
+	if ( syncId != openQ4SaveGameNextSyncId ) {
+		Error( "idRestoreGame::ReadSyncId: sequence mismatch while reading %s%s%s at offset %d (got %d, expected %d)",
+			detail ? detail : "data",
+			classname ? " for " : "",
+			classname ? classname : "",
+			offset,
+			syncId,
+			openQ4SaveGameNextSyncId );
+	}
+
+	openQ4SaveGameNextSyncId++;
 }
 
 /*
@@ -1281,6 +1447,13 @@ void idRestoreGame::ReadString( idStr &string ) {
 	if ( len < 0 || len >= MAX_PRINT_MSG ) {
 		Error( "idRestoreGame::ReadString: invalid length (%d)", len );
 // RAVEN END
+	}
+
+	const int stringOffset = file->Tell();
+	const int fileLength = file->Length();
+	if ( fileLength > 0 && stringOffset >= 0 && len > fileLength - stringOffset ) {
+		Error( "idRestoreGame::ReadString: length %d exceeds remaining savegame bytes %d at offset %d",
+			len, fileLength - stringOffset, stringOffset );
 	}
 
 	string.Fill( ' ', len );
@@ -1435,7 +1608,7 @@ idRestoreGame::ReadStaticObject
 */
 void idRestoreGame::ReadStaticObject( idClass &obj ) {
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadStaticObject", obj.GetClassname() );
+	ReadSyncId( "ReadStaticObject", obj.GetClassname() );
 // RAVEN END
 
 	CallRestore_r( obj.GetType(), &obj );
@@ -1457,7 +1630,7 @@ void idRestoreGame::ReadDict( idDict *dict ) {
 	idStr value;
 
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadDict" );
+	ReadSyncId( "ReadDict" );
 // RAVEN END
 
 	ReadInt( num );
@@ -1610,7 +1783,7 @@ void idRestoreGame::ReadUserInterface( idUserInterface *&ui, const idDict *args 
 	idStr name;
 
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadUserInterface" );
+	ReadSyncId( "ReadUserInterface" );
 // RAVEN END
 
 	ReadString( name );
@@ -1851,7 +2024,7 @@ idRestoreGame::ReadRenderEffect
 void idRestoreGame::ReadRenderEffect( renderEffect_t &renderEffect ) {
 	idStr	name;
 
-	file->ReadSyncId( "ReadRenderEffect" );
+	ReadSyncId( "ReadRenderEffect" );
 
 	renderEffect.declEffect = NULL;
 
@@ -1896,7 +2069,7 @@ void idRestoreGame::ReadFrustum( idFrustum& frustum ) {
 	idMat3 axis;
 	float dNear = 0.0f, dFar = 0.0f, dLeft = 0.0f, dUp = 0.0f;
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadFrustum" );
+	ReadSyncId( "ReadFrustum" );
 // RAVEN END
 	ReadVec3( origin );
 	frustum.SetOrigin( origin );
@@ -1921,7 +2094,7 @@ void idRestoreGame::ReadRenderEntity( renderEntity_t &renderEntity, const idDict
 // RAVEN END
 	int i;
 
-	file->ReadSyncId( "ReadRenderEntity" );
+	ReadSyncId( "ReadRenderEntity" );
 
 	ReadModel( renderEntity.hModel );
 
@@ -1929,6 +2102,9 @@ void idRestoreGame::ReadRenderEntity( renderEntity_t &renderEntity, const idDict
 	ReadInt( renderEntity.bodyId );
 
 	ReadBounds( renderEntity.bounds );
+	if ( !SaveGame_IsValidRenderBounds( renderEntity.bounds ) ) {
+		Error( "idRestoreGame::ReadRenderEntity: invalid render bounds" );
+	}
 
 	assert( renderEntity.bounds[0][0] <= renderEntity.bounds[1][0] ); 
 	assert( renderEntity.bounds[0][1] <= renderEntity.bounds[1][1] );
@@ -1996,7 +2172,7 @@ idRestoreGame::ReadRenderLight
 void idRestoreGame::ReadRenderLight( renderLight_t &renderLight ) {
 	int i;
 
-	file->ReadSyncId( "ReadRenderLight" );
+	ReadSyncId( "ReadRenderLight" );
 
 	ReadMat3( renderLight.axis );
 	ReadVec3( renderLight.origin );
@@ -2048,7 +2224,7 @@ idRestoreGame::ReadRefSound
 */
 void idRestoreGame::ReadRefSound( refSound_t &refSound ) {
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadRefSound" );
+	ReadSyncId( "ReadRefSound" );
 // RAVEN END
 
 	ReadInt( refSound.referenceSoundHandle );
@@ -2078,7 +2254,7 @@ void idRestoreGame::ReadRenderView( renderView_t &view ) {
 	int i;
 
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadRenderView" );
+	ReadSyncId( "ReadRenderView" );
 // RAVEN END
 
 	ReadInt( view.viewID );
@@ -2108,7 +2284,7 @@ idRestoreGame::ReadUsercmd
 */
 void idRestoreGame::ReadUsercmd( usercmd_t &usercmd ) {
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadUsercmd" );
+	ReadSyncId( "ReadUsercmd" );
 // RAVEN END
 	ReadInt( usercmd.gameFrame );
 	ReadInt( usercmd.gameTime );
@@ -2156,7 +2332,7 @@ idRestoreGame::ReadTrace
 */
 void idRestoreGame::ReadTrace( trace_t &trace ) {
 // RAVEN BEGIN
-	file->ReadSyncId( "ReadTrace" );
+	ReadSyncId( "ReadTrace" );
 // RAVEN END
 	ReadFloat( trace.fraction );
 	ReadVec3( trace.endpos );
@@ -2197,7 +2373,125 @@ idRestoreGame::ReadBuildNumber
 =====================
 */
 void idRestoreGame::ReadBuildNumber( void ) {
+	int marker;
+	ReadInt( marker );
+
+	openQ4SaveGameCompatibilityVersion = 0;
+	openQ4SaveGameCompatibilitySourceFileCount = 0;
+	openQ4SaveGameNextSyncId = 0;
+	openQ4SaveGameHasCompatibilityStamp = false;
+	openQ4SaveGameCompatible = false;
+	openQ4SaveGameSyncMarkersEnabled = false;
+	openQ4SaveGameCompatibilityStamp.Clear();
+	openQ4SaveGameCompatibilityError.Clear();
+
+	if ( marker != OPENQ4_SAVEGAME_COMPATIBILITY_MAGIC ) {
+		buildNumber = marker;
+		if ( buildNumber == BUILD_NUMBER ) {
+			openQ4SaveGameCompatible = true;
+		} else {
+			openQ4SaveGameCompatibilityError = va(
+				"legacy save payload build %d does not match current build %d",
+				buildNumber,
+				BUILD_NUMBER );
+		}
+		return;
+	}
+
+	openQ4SaveGameHasCompatibilityStamp = true;
+	ReadInt( openQ4SaveGameCompatibilityVersion );
 	ReadInt( buildNumber );
+	ReadString( openQ4SaveGameCompatibilityStamp );
+
+	if ( openQ4SaveGameCompatibilityVersion != OPENQ4_SAVEGAME_COMPATIBILITY_VERSION ) {
+		openQ4SaveGameCompatibilityError = va(
+			"payload format version %d does not match current version %d",
+			openQ4SaveGameCompatibilityVersion,
+			OPENQ4_SAVEGAME_COMPATIBILITY_VERSION );
+		return;
+	}
+
+	ReadInt( openQ4SaveGameCompatibilitySourceFileCount );
+
+	if ( buildNumber != BUILD_NUMBER ) {
+		openQ4SaveGameCompatibilityError = va(
+			"payload build %d does not match current build %d",
+			buildNumber,
+			BUILD_NUMBER );
+		return;
+	}
+
+	if ( openQ4SaveGameCompatibilityStamp.Icmp( OPENQ4_SAVEGAME_COMPAT_SOURCE_HASH ) != 0 ) {
+		openQ4SaveGameCompatibilityError = va(
+			"source snapshot %s does not match current snapshot %s",
+			openQ4SaveGameCompatibilityStamp.c_str(),
+			OPENQ4_SAVEGAME_COMPAT_SOURCE_HASH );
+		return;
+	}
+
+	if ( openQ4SaveGameCompatibilitySourceFileCount != OPENQ4_SAVEGAME_COMPAT_SOURCE_FILE_COUNT ) {
+		openQ4SaveGameCompatibilityError = va(
+			"source snapshot file count %d does not match current count %d",
+			openQ4SaveGameCompatibilitySourceFileCount,
+			OPENQ4_SAVEGAME_COMPAT_SOURCE_FILE_COUNT );
+		return;
+	}
+
+	openQ4SaveGameCompatible = true;
+	openQ4SaveGameSyncMarkersEnabled = true;
+	openQ4SaveGameNextSyncId = 0;
+}
+
+/*
+=====================
+idRestoreGame::ReadSaveGameFooter
+=====================
+*/
+void idRestoreGame::ReadSaveGameFooter( void ) {
+	if ( !openQ4SaveGameSyncMarkersEnabled ) {
+		return;
+	}
+
+	const int footerOffset = file->Tell();
+	int marker;
+	int footerVersion;
+	int savedFooterOffset;
+	int savedObjectCount;
+	int savedSyncCount;
+
+	ReadInt( marker );
+	ReadInt( footerVersion );
+	ReadInt( savedFooterOffset );
+	ReadInt( savedObjectCount );
+	ReadInt( savedSyncCount );
+
+	if ( marker != OPENQ4_SAVEGAME_FOOTER_MAGIC ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: marker mismatch at offset %d (got 0x%08x, expected 0x%08x)",
+			footerOffset, marker, OPENQ4_SAVEGAME_FOOTER_MAGIC );
+	}
+	if ( footerVersion != OPENQ4_SAVEGAME_FOOTER_VERSION ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: footer version %d does not match current version %d",
+			footerVersion, OPENQ4_SAVEGAME_FOOTER_VERSION );
+	}
+	if ( savedFooterOffset != footerOffset ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: saved footer offset %d does not match actual offset %d",
+			savedFooterOffset, footerOffset );
+	}
+	if ( savedObjectCount != objects.Num() - 1 ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: saved object count %d does not match restored object count %d",
+			savedObjectCount, objects.Num() - 1 );
+	}
+	if ( savedSyncCount != openQ4SaveGameNextSyncId ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: saved sync marker count %d does not match restored count %d",
+			savedSyncCount, openQ4SaveGameNextSyncId );
+	}
+
+	const int fileLength = file->Length();
+	const int endOffset = file->Tell();
+	if ( fileLength > 0 && endOffset >= 0 && endOffset != fileLength ) {
+		Error( "idRestoreGame::ReadSaveGameFooter: %d unexpected trailing bytes after savegame payload",
+			fileLength - endOffset );
+	}
 }
 
 /*
@@ -2207,6 +2501,42 @@ idRestoreGame::GetBuildNumber
 */
 int idRestoreGame::GetBuildNumber( void ) {
 	return buildNumber;
+}
+
+/*
+=====================
+idRestoreGame::HasOpenQ4SaveGameCompatibilityStamp
+=====================
+*/
+bool idRestoreGame::HasOpenQ4SaveGameCompatibilityStamp( void ) const {
+	return openQ4SaveGameHasCompatibilityStamp;
+}
+
+/*
+=====================
+idRestoreGame::IsOpenQ4SaveGameCompatible
+=====================
+*/
+bool idRestoreGame::IsOpenQ4SaveGameCompatible( void ) const {
+	return openQ4SaveGameCompatible;
+}
+
+/*
+=====================
+idRestoreGame::GetOpenQ4SaveGameCompatibilityError
+=====================
+*/
+const char *idRestoreGame::GetOpenQ4SaveGameCompatibilityError( void ) const {
+	return openQ4SaveGameCompatibilityError.c_str();
+}
+
+/*
+=====================
+idRestoreGame::GetOpenQ4SaveGameCompatibilityStamp
+=====================
+*/
+const char *idRestoreGame::GetOpenQ4SaveGameCompatibilityStamp( void ) const {
+	return openQ4SaveGameCompatibilityStamp.c_str();
 }
 
 

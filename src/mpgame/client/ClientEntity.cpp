@@ -337,6 +337,9 @@ rvClientEntity::Restore
 */
 void rvClientEntity::Restore( idRestoreGame *savefile ) {
 	savefile->ReadInt( entityNumber );
+	if ( entityNumber < -1 || entityNumber >= MAX_CENTITIES ) {
+		savefile->Error( "rvClientEntity::Restore: invalid client entity number %d", entityNumber );
+	}
 
 	// idLinkList<rvClientEntity>	spawnNode;		- reconstructed in the master entity load
 	// idLinkList<rvClientEntity>	bindNode;		- reconstructed in the master entity load

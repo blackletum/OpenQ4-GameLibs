@@ -9,6 +9,25 @@ Save game related helper classes.
 */
 
 const int INITIAL_RELEASE_BUILD_NUMBER = 1262;
+const int OPENQ4_SAVEGAME_COMPATIBILITY_MAGIC = 'O' | ( 'Q' << 8 ) | ( '4' << 16 ) | ( 'S' << 24 );
+const int OPENQ4_SAVEGAME_COMPATIBILITY_VERSION = 2;
+const int OPENQ4_SAVEGAME_SYNC_MAGIC = 'O' | ( 'Q' << 8 ) | ( '4' << 16 ) | ( 'Y' << 24 );
+const int OPENQ4_SAVEGAME_FOOTER_MAGIC = 'O' | ( 'Q' << 8 ) | ( '4' << 16 ) | ( 'F' << 24 );
+const int OPENQ4_SAVEGAME_FOOTER_VERSION = 1;
+
+#if defined( __has_include )
+#if __has_include( "openq4_savegame_compat_generated.h" )
+#include "openq4_savegame_compat_generated.h"
+#endif
+#endif
+
+#ifndef OPENQ4_SAVEGAME_COMPAT_SOURCE_HASH
+#define OPENQ4_SAVEGAME_COMPAT_SOURCE_HASH "standalone-openq4-game"
+#endif
+
+#ifndef OPENQ4_SAVEGAME_COMPAT_SOURCE_FILE_COUNT
+#define OPENQ4_SAVEGAME_COMPAT_SOURCE_FILE_COUNT 0
+#endif
 
 class idSaveGame {
 public:
@@ -88,8 +107,12 @@ protected:
 	idFile *				file;
 
 	idList<const idClass *>	objects;
+	int						openQ4SaveGameNextSyncId;
+	bool					openQ4SaveGameSyncMarkersEnabled;
 
+	void					WriteChecked( int bytesWritten, int expected, const char *detail, int offset );
 	void					CallSave_r( const idTypeInfo *cls, const idClass *obj );
+	void					WriteSaveGameFooter( int numObjects );
 };
 
 class idRestoreGame {
@@ -153,7 +176,7 @@ public:
 	void					ReadInterpolate( idInterpolate<idVec3>& lerp );
 	void					ReadRenderEffect( renderEffect_t &renderEffect );
 	void					ReadFrustum( idFrustum& frustum );
-	void					ReadSyncId( const char *detail = "unspecified", const char *classname = NULL ) { file->ReadSyncId( detail, classname ); }
+	void					ReadSyncId( const char *detail = "unspecified", const char *classname = NULL );
 	void					ReadRenderEntity( renderEntity_t &renderEntity, const idDict *args );
 // RAVEN END		
 	void					ReadRenderLight( renderLight_t &renderLight );
@@ -166,12 +189,25 @@ public:
 	void					ReadSoundCommands( void );
 
 	void					ReadBuildNumber( void );
+	void					ReadSaveGameFooter( void );
 
 	//						Used to retrieve the saved game buildNumber from within class Restore methods
 	int						GetBuildNumber( void );
+	bool					HasOpenQ4SaveGameCompatibilityStamp( void ) const;
+	bool					IsOpenQ4SaveGameCompatible( void ) const;
+	const char *			GetOpenQ4SaveGameCompatibilityError( void ) const;
+	const char *			GetOpenQ4SaveGameCompatibilityStamp( void ) const;
 
 private:
 	int						buildNumber;
+	int						openQ4SaveGameCompatibilityVersion;
+	int						openQ4SaveGameCompatibilitySourceFileCount;
+	int						openQ4SaveGameNextSyncId;
+	bool					openQ4SaveGameHasCompatibilityStamp;
+	bool					openQ4SaveGameCompatible;
+	bool					openQ4SaveGameSyncMarkersEnabled;
+	idStr					openQ4SaveGameCompatibilityStamp;
+	idStr					openQ4SaveGameCompatibilityError;
 
 	idFile *				file;
 
