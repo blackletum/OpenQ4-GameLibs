@@ -64,7 +64,9 @@ static int SaveGame_FindObjectIndex( const idList<const idClass *> &objects, con
 
 static bool SaveGame_IsValidRenderBounds( const idBounds &bounds ) {
 	for ( int i = 0; i < 3; i++ ) {
-		if ( FLOAT_IS_NAN( bounds[0][i] ) || FLOAT_IS_NAN( bounds[1][i] ) ) {
+		const float boundsMin = bounds[0][i];
+		const float boundsMax = bounds[1][i];
+		if ( FLOAT_IS_NAN( boundsMin ) || FLOAT_IS_NAN( boundsMax ) ) {
 			return false;
 		}
 		if ( bounds[0][i] > bounds[1][i] ) {
