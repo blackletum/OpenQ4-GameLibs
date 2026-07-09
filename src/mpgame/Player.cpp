@@ -11517,6 +11517,9 @@ spectate follow?
 ==================
 */
 void idPlayer::SmoothenRenderView( bool firstPerson ) {
+// jmarshall - the engine usercmd_t carries no realTime field, so the recorded
+// interval needed for this interpolation is unavailable.
+/*
 	int d1, d2;
 	idAngles angles, anglesDelta, newAngles;
 
@@ -11551,6 +11554,8 @@ void idPlayer::SmoothenRenderView( bool firstPerson ) {
 			firstPersonViewAxis = renderView->viewaxis;
 		}
 	}
+*/
+// jmarshall end
 }
 
 /*
