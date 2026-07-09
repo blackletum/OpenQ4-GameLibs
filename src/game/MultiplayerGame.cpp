@@ -3618,7 +3618,7 @@ void idMultiplayerGame::CommonRun( void ) {
 			item->FreeModelDef();
 
 			renderEntity_t* renderEntity = item->GetRenderEntity();
-			memset( renderEntity, 0, sizeof( renderEntity ) );
+			memset( renderEntity, 0, sizeof( *renderEntity ) );
 
 			item->simpleItem = g_simpleItems.GetBool() && gameLocal.isMultiplayer && !item->IsType( rvItemCTFFlag::GetClassType() );
 
