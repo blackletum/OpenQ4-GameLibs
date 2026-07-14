@@ -119,6 +119,8 @@ rvMonsterHarvester::rvMonsterHarvester
 ================
 */
 rvMonsterHarvester::rvMonsterHarvester ( void ) {
+	nextTurnTime = 0;
+	sweepCount = 0;
 }
 
 void rvMonsterHarvester::InitSpawnArgsVariables( void )
@@ -205,7 +207,13 @@ void rvMonsterHarvester::Restore ( idRestoreGame *savefile ) {
 	
 	int i;
 	for ( i = 0; i < WHIP_MAX; i++ ) {
-		savefile->ReadObject( reinterpret_cast<idClass*&>( whipProjectiles[i] ) );
+		idClass* object = NULL;
+		savefile->ReadObject( object );
+		idEntity* projectile = dynamic_cast<idEntity*>( object );
+		if ( object && !projectile ) {
+			savefile->Error( "rvMonsterHarvester::Restore: whip projectile %d is not an entity", i );
+		}
+		whipProjectiles[i] = projectile;
 	}
 
 	savefile->ReadInt( nextTurnTime );
@@ -813,13 +821,13 @@ const char* rvMonsterHarvester::GetMeleeAttackAnim ( const idVec3& target ) {
 	if ( yaw < -10.0f ) {
 		if ( partHealth[PART_LEG_FR] <= 0 )
 		{
-			return false;
+			return NULL;
 		}
 		animName = "attack_rleg_fw_rt";
 	} else if ( yaw > 10.0f ) {
 		if ( partHealth[PART_LEG_FL] <= 0 )
 		{
-			return false;
+			return NULL;
 		}
 		animName = "attack_lleg_fw_lt";
 	} else{
@@ -827,7 +835,7 @@ const char* rvMonsterHarvester::GetMeleeAttackAnim ( const idVec3& target ) {
 		{
 			if ( partHealth[PART_LEG_FL] <= 0 )
 			{
-				return false;
+				return NULL;
 			}
 			animName = "attack_lleg_fw";
 		}
@@ -835,7 +843,7 @@ const char* rvMonsterHarvester::GetMeleeAttackAnim ( const idVec3& target ) {
 		{
 			if ( partHealth[PART_LEG_FR] <= 0 )
 			{
-				return false;
+				return NULL;
 			}
 			animName = "attack_rleg_fw";
 		}

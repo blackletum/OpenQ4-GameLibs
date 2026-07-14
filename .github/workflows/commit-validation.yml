@@ -14,8 +14,22 @@ concurrency:
 
 jobs:
   script-smoke:
-    name: Script Smoke
+    name: Linux x64 GameLibs (${{ matrix.compiler }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            cxx: g++
+          - compiler: Clang
+            cc: clang
+            cxx: clang++
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -25,16 +39,219 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Install Clang
+        if: matrix.compiler == 'Clang'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang
+
       - name: Run static checks
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/linux_portability_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
           python tools/tests/arm64_abi_contract.py
+          python tools/tests/linux_portability_contract.py
           python tools/tests/macos_meson_contract.py
           python tools/tests/savegame_corruption_contract.py
           python tools/tests/source_input_contract.py
           python src/buildscripts/list_sources.py src idlib idlib/math/Simd_AltiVec.cpp >/dev/null
+
+      - name: Run native Linux portability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror tools/tests/linux_portability_probe.cpp -o .tmp/linux-portability-probe
+          .tmp/linux-portability-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas -Wno-register tools/tests/md5_checksum_probe.cpp -o .tmp/md5-checksum-probe
+          .tmp/md5-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas -Wno-register tools/tests/md4_checksum_probe.cpp -o .tmp/md4-checksum-probe
+          .tmp/md4-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas tools/tests/crc_checksum_probe.cpp -o .tmp/crc-checksum-probe
+          .tmp/crc-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -funsigned-char -DOPENQ4_EXPECT_UNSIGNED_PLAIN_CHAR=1 tools/tests/binary_token_signed_char_probe.cpp -o .tmp/binary-token-signed-char-probe
+          .tmp/binary-token-signed-char-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=undefined tools/tests/lp64_semantics_probe.cpp -o .tmp/lp64-semantics-probe
+          .tmp/lp64-semantics-probe
+
+      - name: Install Meson and Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install meson ninja
+
+      - name: Build Linux x64 game libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          meson setup --wipe builddir . --backend ninja --buildtype debugoptimized
+          meson compile -C builddir
+
+      - name: Validate Linux x64 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          modules=(
+            builddir/src/game-sp_x64.so
+            builddir/src/game-mp_x64.so
+          )
+          for module in "${modules[@]}"; do
+            test -f "${module}"
+            file "${module}"
+            readelf -h "${module}" | grep -Eq 'Class:[[:space:]]+ELF64'
+            readelf -h "${module}" | grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64'
+            readelf -lW "${module}" | grep -q 'GNU_RELRO'
+            readelf -dW "${module}" | grep -Eq 'BIND_NOW|FLAGS.*NOW'
+            if readelf -lW "${module}" | grep -Eq 'GNU_STACK.*RWE'; then
+              echo "Linux game module has an executable stack: ${module}" >&2
+              exit 1
+            fi
+            readelf --wide --dyn-syms "${module}" | awk '
+              $7 != "UND" &&
+              ($5 == "GLOBAL" || $5 == "WEAK" || $5 == "UNIQUE") &&
+              ($6 == "DEFAULT" || $6 == "PROTECTED") {
+                count++
+                if ($4 == "FUNC" && $5 == "GLOBAL" && $6 == "DEFAULT" && $8 == "GetGameAPI") {
+                  api++
+                } else {
+                  unexpected++
+                  print "Unexpected public game-module symbol: " $0 > "/dev/stderr"
+                }
+              }
+              END {
+                if (count != 1 || api != 1 || unexpected != 0) {
+                  print "Expected exactly one GLOBAL DEFAULT FUNC GetGameAPI export" > "/dev/stderr"
+                  exit 1
+                }
+              }
+            '
+          done
+          if cmp -s "${modules[0]}" "${modules[1]}"; then
+            echo 'Linux SP and MP game modules are unexpectedly identical.' >&2
+            exit 1
+          fi
+
+  linux-arm64-source-consumer:
+    name: Linux ARM64 GameLibs (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: GCC
+            cc: gcc
+            cxx: g++
+          - compiler: Clang
+            cc: clang
+            cxx: clang++
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Clang
+        if: matrix.compiler == 'Clang'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang
+
+      - name: Run ARM64 source-input checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile tools/tests/arm64_abi_contract.py tools/tests/linux_portability_contract.py
+          python tools/tests/arm64_abi_contract.py
+          python tools/tests/linux_portability_contract.py
+
+      - name: Run native Linux ARM64 portability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror tools/tests/linux_portability_probe.cpp -o .tmp/linux-portability-probe
+          .tmp/linux-portability-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas -Wno-register tools/tests/md5_checksum_probe.cpp -o .tmp/md5-checksum-probe
+          .tmp/md5-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas -Wno-register tools/tests/md4_checksum_probe.cpp -o .tmp/md4-checksum-probe
+          .tmp/md4-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -Wno-unknown-pragmas tools/tests/crc_checksum_probe.cpp -o .tmp/crc-checksum-probe
+          .tmp/crc-checksum-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -funsigned-char -DOPENQ4_EXPECT_UNSIGNED_PLAIN_CHAR=1 tools/tests/binary_token_signed_char_probe.cpp -o .tmp/binary-token-signed-char-probe
+          .tmp/binary-token-signed-char-probe
+          "${CXX}" -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=undefined tools/tests/lp64_semantics_probe.cpp -o .tmp/lp64-semantics-probe
+          .tmp/lp64-semantics-probe
+
+      - name: Install Meson and Ninja
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install meson ninja
+
+      - name: Build Linux ARM64 game libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          meson setup --wipe builddir . --backend ninja --buildtype debugoptimized
+          meson compile -C builddir
+
+      - name: Validate Linux ARM64 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          modules=(
+            builddir/src/game-sp_arm64.so
+            builddir/src/game-mp_arm64.so
+          )
+          for module in "${modules[@]}"; do
+            test -f "${module}"
+            file "${module}"
+            readelf -h "${module}" | grep -Eq 'Class:[[:space:]]+ELF64'
+            readelf -h "${module}" | grep -Eq 'Machine:[[:space:]]+AArch64'
+            readelf -lW "${module}" | grep -q 'GNU_RELRO'
+            readelf -dW "${module}" | grep -Eq 'BIND_NOW|FLAGS.*NOW'
+            if readelf -lW "${module}" | grep -Eq 'GNU_STACK.*RWE'; then
+              echo "Linux game module has an executable stack: ${module}" >&2
+              exit 1
+            fi
+            readelf --wide --dyn-syms "${module}" | awk '
+              $7 != "UND" &&
+              ($5 == "GLOBAL" || $5 == "WEAK" || $5 == "UNIQUE") &&
+              ($6 == "DEFAULT" || $6 == "PROTECTED") {
+                count++
+                if ($4 == "FUNC" && $5 == "GLOBAL" && $6 == "DEFAULT" && $8 == "GetGameAPI") {
+                  api++
+                } else {
+                  unexpected++
+                  print "Unexpected public game-module symbol: " $0 > "/dev/stderr"
+                }
+              }
+              END {
+                if (count != 1 || api != 1 || unexpected != 0) {
+                  print "Expected exactly one GLOBAL DEFAULT FUNC GetGameAPI export" > "/dev/stderr"
+                  exit 1
+                }
+              }
+            '
+          done
+          if cmp -s "${modules[0]}" "${modules[1]}"; then
+            echo 'Linux SP and MP game modules are unexpectedly identical.' >&2
+            exit 1
+          fi
 
   windows-x64:
     name: Windows x64 GameLibs
@@ -62,8 +279,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/linux_portability_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
           python tools/tests/arm64_abi_contract.py
+          python tools/tests/linux_portability_contract.py
           python tools/tests/macos_meson_contract.py
           python tools/tests/savegame_corruption_contract.py
           python tools/tests/source_input_contract.py
@@ -110,8 +328,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
+          python -m py_compile src/buildscripts/list_sources.py tools/tests/arm64_abi_contract.py tools/tests/linux_portability_contract.py tools/tests/macos_meson_contract.py tools/tests/savegame_corruption_contract.py tools/tests/source_input_contract.py
           python tools/tests/arm64_abi_contract.py
+          python tools/tests/linux_portability_contract.py
           python tools/tests/macos_meson_contract.py
           python tools/tests/savegame_corruption_contract.py
           python tools/tests/source_input_contract.py

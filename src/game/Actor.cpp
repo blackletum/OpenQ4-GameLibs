@@ -465,6 +465,8 @@ idActor::idActor( void )
 	flashlightHandle = -1;
 
 	deathPushTime	= 0;
+	deathPushForce.Zero();
+	deathPushJoint	= INVALID_JOINT;
 	
 	eyeOffsetJoint = INVALID_JOINT;
 	chestOffsetJoint = INVALID_JOINT;

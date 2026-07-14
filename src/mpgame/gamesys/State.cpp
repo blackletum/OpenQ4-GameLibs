@@ -397,7 +397,9 @@ void rvStateThread::Restore( idRestoreGame *saveFile, idClass* owner ) {
 
 	this->owner = owner;
 
-	saveFile->ReadInt( (int&)lastResult );
+	int restoredResult;
+	saveFile->ReadInt( restoredResult );
+	lastResult = static_cast<stateResult_t>( restoredResult );
 	saveFile->Read ( &fl, sizeof(fl) );
 
 	saveFile->ReadInt( numStates );

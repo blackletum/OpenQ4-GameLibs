@@ -406,6 +406,18 @@ private:
 
 //============================================================================
 
+ID_INLINE int PackEntitySpawnId( const int entitySpawnId, const int entityNumber ) {
+	const unsigned int packed = ( static_cast<unsigned int>( entitySpawnId ) << GENTITYNUM_BITS ) |
+		static_cast<unsigned int>( entityNumber );
+	return static_cast<int>( packed );
+}
+
+ID_INLINE int PackClientEntitySpawnId( const int entitySpawnId, const int entityNumber ) {
+	const unsigned int packed = ( static_cast<unsigned int>( entitySpawnId ) << CENTITYNUM_BITS ) |
+		static_cast<unsigned int>( entityNumber );
+	return static_cast<int>( packed );
+}
+
 template< class type >
 class idEntityPtr {
 public:
@@ -787,7 +799,7 @@ public:
 	// used to skip one when registering entities, leaving an empty entity in the array
 	void					SkipEntityIndex( void );
 
-	bool					RequirementMet( idEntity *activator, const idStr &requires, int removeItem );
+	bool					RequirementMet( idEntity *activator, const idStr &requirement, int removeItem );
 
 // RITUAL BEGIN
 // squirrel: accessor for si_weaponStay checks
@@ -1509,7 +1521,7 @@ ID_INLINE idEntityPtr<type> &idEntityPtr<type>::operator=( type *ent ) {
 	if ( ent == NULL ) {
 		spawnId = 0;
 	} else {
-		spawnId = ( gameLocal.spawnIds[ent->entityNumber] << GENTITYNUM_BITS ) | ent->entityNumber;
+		spawnId = PackEntitySpawnId( gameLocal.spawnIds[ent->entityNumber], ent->entityNumber );
 	}
 	return *this;
 }

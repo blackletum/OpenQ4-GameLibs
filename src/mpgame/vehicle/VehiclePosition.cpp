@@ -18,6 +18,9 @@ rvVehiclePosition::rvVehiclePosition
 rvVehiclePosition::rvVehiclePosition ( void ) {	
 	memset ( &mInputCmd, 0, sizeof(mInputCmd) );
 	mInputAngles.Zero ( );
+	memset ( &mOldInputCmd, 0, sizeof(mOldInputCmd) );
+	mOldInputAngles.Zero ( );
+	mOldInputFlags = 0;
 
 	memset ( &fl, 0, sizeof(fl) );
 

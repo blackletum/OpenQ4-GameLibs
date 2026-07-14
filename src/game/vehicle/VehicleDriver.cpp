@@ -457,9 +457,12 @@ int	rvVehicleDriver::SortTargetList( idEntity* ent ) const {
 	idEntity *	target;
 
 	ent->RemoveNullTargets();
-	qsort( ent->targets.Ptr(), NumTargets( ent ), ent->targets.TypeSize(), rvVehicleDriver::SortValid );
+	const int numTargets = NumTargets( ent );
+	if ( numTargets > 1 ) {
+		qsort( ent->targets.Ptr(), numTargets, ent->targets.TypeSize(), rvVehicleDriver::SortValid );
+	}
 
-	for( int ix = NumTargets( ent ) - 1; ix >= 0; --ix ) {
+	for( int ix = numTargets - 1; ix >= 0; --ix ) {
 		target = GetTarget( ent, ix );
 
 		if( IsValidTarget( target ) ) {

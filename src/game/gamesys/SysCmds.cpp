@@ -646,7 +646,7 @@ idGameEdit::ClassSummary
 */
 size_t idGameEdit::ClassSummary( const idCmdArgs &args ) const {
 
-	common->Printf( "Classes         - %dK\n", idClass::GetUsedMemory() / 1024 );
+	common->Printf( "Classes         - %zuK\n", idClass::GetUsedMemory() / 1024 );
 
 	return( idClass::GetUsedMemory() / 1024 );
 }
@@ -659,7 +659,7 @@ idGameEdit::EntitySummary
 
 size_t idGameEdit::EntitySummary( const idCmdArgs &args ) const {
 
-	common->Printf( "CL & SV ents    - %dK\n", gameLocal.GetEntityMemoryUsage () / 1024);
+	common->Printf( "CL & SV ents    - %zuK\n", gameLocal.GetEntityMemoryUsage () / 1024);
 
 	return gameLocal.GetEntityMemoryUsage() / 1024;
 }
@@ -1377,7 +1377,7 @@ Cmd_AddChatLine_f
 ==================
 */
 static void Cmd_AddChatLine_f( const idCmdArgs &args ) {
-	gameLocal.mpGame.AddChatLine( args.Argv( 1 ) );
+	gameLocal.mpGame.AddChatLine( "%s", args.Argv( 1 ) );
 }
 
 /*
@@ -3871,7 +3871,7 @@ void Cmd_ToggleBuyMenu_f( const idCmdArgs& args ) {
 void Cmd_BuyItem_f( const idCmdArgs& args ) {
 	idPlayer* player = gameLocal.GetLocalPlayer();
 	if ( !player ) {
-		common->Printf( "ERROR: Cmd_BuyItem_f() failed, since GetLocalPlayer() was NULL.\n", player );
+		common->Printf( "ERROR: Cmd_BuyItem_f() failed, since GetLocalPlayer() was NULL.\n" );
 		return;
 	}
 

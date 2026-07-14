@@ -35,6 +35,24 @@ The x64 build uses the generic SIMD implementation; the legacy MMX/3DNow/SSE sou
 From openQ4, you can invoke this same flow with:
 `powershell -ExecutionPolicy Bypass -File tools/build/build_gamelibs.ps1`
 
+### Linux x64/ARM64 (Meson + Ninja)
+Standalone Linux builds are supported with GCC or Clang on x64 and ARM64 hosts. They produce the same SP/MP module split consumed by openQ4.
+
+Requirements:
+- GCC or Clang with C++17 support
+- Python 3, Meson, and Ninja
+
+1. Configure:
+   `meson setup --wipe builddir . --backend ninja --buildtype release`
+2. Build:
+   `meson compile -C builddir`
+3. Outputs:
+   `builddir/src/game-sp_x64.so` and `builddir/src/game-mp_x64.so` on x64 hosts, or `builddir/src/game-sp_arm64.so` and `builddir/src/game-mp_arm64.so` on ARM64 hosts
+
+Standalone modules are useful for compiler and ABI validation. Runtime and gameplay signoff remains authoritative through the companion openQ4 engine with the shipped Quake 4 assets.
+
+Linux modules use a closed engine-facing ABI: linking fails when a definition is unresolved, and a linker version script exposes only `GetGameAPI` while keeping every implementation symbol private. This policy is shared with openQ4's integrated game-module build so standalone and packaged modules fail consistently when their ABI drifts.
+
 ### macOS (Experimental Meson + Ninja)
 The standalone macOS build path is available for Clang-based x64 and arm64 bring-up. It emits `.dylib` game modules with install names compatible with the openQ4 package layout.
 
@@ -47,12 +65,12 @@ Requirements:
 2. Build:
    `meson compile -C builddir`
 3. Outputs:
-   `builddir/src/game-sp_arm64.dylib` and `builddir/src/game-mp_arm64.dylib` on Apple Silicon hosts, or `game-sp_x64.dylib` and `game-mp_x64.dylib` on Intel hosts
+   `builddir/src/game-sp_arm64.dylib` and `builddir/src/game-mp_arm64.dylib` on Apple Silicon hosts, or `builddir/src/game-sp_x64.dylib` and `builddir/src/game-mp_x64.dylib` on Intel hosts
 
 The macOS path is intended to match openQ4's staged `baseoq4/` module naming and `@loader_path` install-name policy. Validate gameplay through the companion openQ4 engine checkout before treating a build as release-ready.
 
 ### Continuous Integration
-Pull requests and pushes run Linux source-input contract checks plus standalone Windows and macOS CI coverage. Linux CI intentionally verifies this repository's role as source input for openQ4 rather than building standalone Linux modules. The macOS job builds the Clang-based modules and checks that each `.dylib` uses the expected package-relative `@loader_path` install name; the Windows job keeps the MSVC `.dll` flow covered.
+Pull requests and pushes build standalone Linux game modules natively on x64 and ARM64, alongside Windows and macOS coverage. The Linux jobs also run focused portability probes for architecture identity, 16-byte alignment, aligned stack allocation, LP64 semantics, and deterministic checksums. They verify both `.so` modules as ELF binaries, reject unresolved definitions, and require `GetGameAPI` to be the sole public definition. The macOS job checks the expected package-relative `@loader_path` install name; the Windows job keeps the MSVC `.dll` flow covered.
 
 ARM64 ABI static checks also run in CI. They guard idClass allocation alignment, savegame object serialization by object index instead of raw pointer value, script pointer-width fields that must use `intptr_t`, and alignment-sensitive stack and heap allocations used by joint, trace, animation, and event paths.
 
@@ -70,7 +88,7 @@ ARM64 ABI static checks also run in CI. They guard idClass allocation alignment,
 - Companion engine repository: `https://github.com/themuffinator/openQ4`
 - Default local companion path: `..\openQ4` (sibling repo layout).
 - openQ4 consumes this repository as source input and stages the files it needs into the engine build tree before compiling SP/MP modules.
-- On Linux, openQ4's staged engine build is the supported path for compiling SP/MP modules from this source input.
+- On Linux, standalone builds provide direct compiler/ABI validation while openQ4's staged engine build provides integrated runtime modules and gameplay validation.
 - openQ4 build wrappers can invoke this repository's standalone build as an optional developer convenience.
 
 ## Project Goals

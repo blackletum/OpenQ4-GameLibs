@@ -1213,7 +1213,9 @@ void idMultiplayerGame::UpdatePlayerRanks( playerRankMode_t rankMode ) {
 		}
 	}
 
-	qsort( rankedPlayers.Ptr(), rankedPlayers.Num(), rankedPlayers.TypeSize(), ComparePlayersByScore );
+	if ( rankedPlayers.Num() > 1 ) {
+		qsort( rankedPlayers.Ptr(), rankedPlayers.Num(), rankedPlayers.TypeSize(), ComparePlayersByScore );
+	}
 
 	for( int i = 0; i < rankedPlayers.Num(); i++ ) {
 		bool tied;
@@ -2515,7 +2517,7 @@ void idMultiplayerGame::PlayerStats( int clientNum, char *data, const int len ) 
 		return;
 	}
 
-	idStr::snPrintf( data, len, "team=%d score=%ld tks=%ld", team, playerState[ clientNum ].fragCount, playerState[ clientNum ].teamFragCount );
+	idStr::snPrintf( data, len, "team=%d score=%d tks=%d", team, playerState[ clientNum ].fragCount, playerState[ clientNum ].teamFragCount );
 }
 
 /*
@@ -2942,7 +2944,7 @@ void idMultiplayerGame::ClientStartPackedVote( int clientNum, const voteStruct_t
 	}
 
 	// "%s has called a vote!"
-	AddChatLine( va( common->GetLocalizedString( "#str_104279" ), gameLocal.userInfo[ clientNum ].GetString( "ui_name" ) ) );
+	AddChatLine( "%s", va( common->GetLocalizedString( "#str_104279" ), gameLocal.userInfo[ clientNum ].GetString( "ui_name" ) ) );
 
 	// display the vote called text on the hud and play an announcer sound
 	if ( mpHud ) {
@@ -5649,10 +5651,11 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			// get the selected client num, as well as the selectionIndex/Team from the stat window
 			int client = statManager->GetSelectedClientNum( &selectionIndex, &selectionTeam );
 
-			
-			if ( gameLocal.GetLocalPlayer() ) {
-				ClientVoiceMute( client, !gameLocal.GetLocalPlayer()->IsPlayerMuted( client ) );
+			if( ( client < 0 || client >= MAX_CLIENTS ) || !gameLocal.GetLocalPlayer() ) {
+				continue;
 			}
+
+			ClientVoiceMute( client, !gameLocal.GetLocalPlayer()->IsPlayerMuted( client ) );
 
 			// refresh with new info
 			statManager->SetupStatWindow( currentGui );
@@ -6439,10 +6442,10 @@ void idMultiplayerGame::PrintMessageEvent( int to, msg_evt_t evt, int parm1, int
 			AddChatLine( common->GetLocalizedString( "#str_104289" ), gameLocal.userInfo[ parm1 ].GetString( "ui_name" ) );
 			break;
 		case MSG_VOTE:
-			AddChatLine( common->GetLocalizedString( "#str_104288" ) );
+			AddChatLine( "%s", common->GetLocalizedString( "#str_104288" ) );
 			break;
 		case MSG_SUDDENDEATH:
-			AddChatLine( common->GetLocalizedString( "#str_104287" ) );
+			AddChatLine( "%s", common->GetLocalizedString( "#str_104287" ) );
 			break;
 		case MSG_FORCEREADY:
 			AddChatLine( common->GetLocalizedString( "#str_104286" ), gameLocal.userInfo[ parm1 ].GetString( "ui_name" ) );
@@ -6457,7 +6460,7 @@ void idMultiplayerGame::PrintMessageEvent( int to, msg_evt_t evt, int parm1, int
 			AddChatLine( common->GetLocalizedString( "#str_104285" ), gameLocal.userInfo[ parm1 ].GetString( "ui_name" ) );
 			break;
 		case MSG_TIMELIMIT:
-			AddChatLine( common->GetLocalizedString( "#str_104284" ) );
+			AddChatLine( "%s", common->GetLocalizedString( "#str_104284" ) );
 			break;
 		case MSG_FRAGLIMIT:
 			// RITUAL BEGIN
@@ -6479,7 +6482,7 @@ void idMultiplayerGame::PrintMessageEvent( int to, msg_evt_t evt, int parm1, int
 			// RAVEN END
 			break;
 		case MSG_HOLYSHIT:
-			AddChatLine( common->GetLocalizedString( "#str_106732" ) );
+			AddChatLine( "%s", common->GetLocalizedString( "#str_106732" ) );
 			break;
 		default:
 			gameLocal.DPrintf( "PrintMessageEvent: unknown message type %d\n", evt );
@@ -6509,7 +6512,7 @@ void idMultiplayerGame::PrintMessage( int to, const char* msg ) {
 		return;
 	}
 
-	AddChatLine( msg );
+	AddChatLine( "%s", msg );
 
 	if ( !gameLocal.isClient ) {
 		idBitMsg outMsg;
@@ -6792,7 +6795,7 @@ void idMultiplayerGame::Vote_f( const idCmdArgs &args ) {
 // RAVEN BEGIN
 // shouchard:  implemented for testing	
 	if ( args.Argc() < 2 ) {
-		common->Printf( common->GetLocalizedString( "#str_104418" ) );
+		common->Printf( "%s", common->GetLocalizedString( "#str_104418" ) );
 		return;
 	}
 
@@ -6817,8 +6820,8 @@ void idMultiplayerGame::CallVote_f( const idCmdArgs &args ) {
 	const char *szArg1 = args.Argv(1);
 	const char *szArg2 = args.Argv(2);
 	if ( '\0' == *szArg1 ) {
-		common->Printf( common->GetLocalizedString( "#str_104404" ) );
-		common->Printf( common->GetLocalizedString( "#str_104405" ) );
+		common->Printf( "%s", common->GetLocalizedString( "#str_104404" ) );
+		common->Printf( "%s", common->GetLocalizedString( "#str_104405" ) );
 		return;
 	}
 
@@ -6829,22 +6832,22 @@ void idMultiplayerGame::CallVote_f( const idCmdArgs &args ) {
 		voteData.m_fieldFlags |= VOTEFLAG_RESTART;
 	} else if ( 0 == idStr::Icmp( szArg1, "timelimit" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104406" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104406" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_TIMELIMIT;
 		voteData.m_timeLimit = atoi( szArg2 );
 	} else if ( 0 == idStr::Icmp( szArg1, "fraglimit" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104407" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104407" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_FRAGLIMIT;
 		voteData.m_fragLimit = atoi( szArg2 );
 	} else if ( 0 == idStr::Icmp( szArg1, "gametype" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104408" ) );
-			common->Printf( common->GetLocalizedString( "#str_104409" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104408" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104409" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_GAMETYPE;
@@ -6852,7 +6855,7 @@ void idMultiplayerGame::CallVote_f( const idCmdArgs &args ) {
 	}
 	else if ( 0 == idStr::Icmp( szArg1, "kick" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104412" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104412" ) );
 			return;
 		}
 		voteData.m_kick = gameLocal.mpGame.GetClientNumFromPlayerName( szArg2 );
@@ -6861,40 +6864,40 @@ void idMultiplayerGame::CallVote_f( const idCmdArgs &args ) {
 		}
 	} else if ( 0 == idStr::Icmp( szArg1, "map" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104413" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104413" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_MAP;
 		voteData.m_map = szArg2;
 	} else if ( 0 == idStr::Icmp( szArg1, "buying" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_122012" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_122012" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_BUYING;
 		voteData.m_buying = atoi( szArg2 );
 	} else if ( 0 == idStr::Icmp( szArg1, "capturelimit" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104415" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104415" ) );
 			return;
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_CAPTURELIMIT;
 		voteData.m_captureLimit = atoi( szArg2 );
 	} else if ( 0 == idStr::Icmp( szArg1, "autobalance" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_104416" ) );
+			common->Printf( "%s", common->GetLocalizedString( "#str_104416" ) );
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_TEAMBALANCE;
 		voteData.m_teamBalance = atoi( szArg2 );
 	} else if ( 0 == idStr::Icmp( szArg1, "controlTime" ) ) {
 		if ( '\0' == *szArg2 ) {
-			common->Printf( common->GetLocalizedString( "#str_122002" ) ); // Squirrel@Ritual - Localized for 1.2 Patch
+			common->Printf( "%s", common->GetLocalizedString( "#str_122002" ) ); // Squirrel@Ritual - Localized for 1.2 Patch
 		}
 		voteData.m_fieldFlags |= VOTEFLAG_CONTROLTIME;
 		voteData.m_controlTime = atoi(szArg2 );
 	} else {
-		common->Printf( common->GetLocalizedString( "#str_104404" ) );
-		common->Printf( common->GetLocalizedString( "#str_104405" ) );
+		common->Printf( "%s", common->GetLocalizedString( "#str_104404" ) );
+		common->Printf( "%s", common->GetLocalizedString( "#str_104405" ) );
 		return;
 	}
 
@@ -7072,10 +7075,10 @@ void idMultiplayerGame::ClientStartVote( int clientNum, const char *_voteString 
 	}
 
 	voteString = _voteString;
-	AddChatLine( va( common->GetLocalizedString( "#str_104279" ), gameLocal.userInfo[ clientNum ].GetString( "ui_name" ) ) );
+	AddChatLine( "%s", va( common->GetLocalizedString( "#str_104279" ), gameLocal.userInfo[ clientNum ].GetString( "ui_name" ) ) );
 // RAVEN BEGIN
 // shouchard:  better info when a vote called in the chat buffer
-	AddChatLine( voteString ); // TODO:  will push this into a UI field later
+	AddChatLine( "%s", voteString.c_str() ); // TODO:  will push this into a UI field later
 // shouchard:  display the vote called text on the hud
 	if ( gameLocal.GetLocalPlayer() && gameLocal.GetLocalPlayer()->mphud ) {
 		gameLocal.GetLocalPlayer()->mphud->SetStateInt( "voteNotice", 1 );
@@ -7149,7 +7152,7 @@ void idMultiplayerGame::ClientUpdateVote( vote_result_t status, int yesCount, in
 	switch ( status ) {
 		case VOTE_FAILED:
 			localizedString = common->GetLocalizedString( "#str_104278" );
-			AddChatLine( localizedString );
+			AddChatLine( "%s", localizedString );
 			ScheduleAnnouncerSound( AS_GENERAL_VOTE_FAILED, gameLocal.time );
 			if ( gameLocal.isClient ) {
 				vote = VOTE_NONE;
@@ -7157,7 +7160,7 @@ void idMultiplayerGame::ClientUpdateVote( vote_result_t status, int yesCount, in
 			break;
 		case VOTE_PASSED:
 			localizedString = common->GetLocalizedString( "#str_104277" );
-			AddChatLine( localizedString );
+			AddChatLine( "%s", localizedString );
 			ScheduleAnnouncerSound( AS_GENERAL_VOTE_PASSED, gameLocal.time );
 			break;
 		case VOTE_RESET:
@@ -7167,7 +7170,7 @@ void idMultiplayerGame::ClientUpdateVote( vote_result_t status, int yesCount, in
 			break;
 		case VOTE_ABORTED:
 			localizedString = common->GetLocalizedString( "#str_104276" );
-			AddChatLine( localizedString );
+			AddChatLine( "%s", localizedString );
 			if ( gameLocal.isClient ) {
 				vote = VOTE_NONE;
 			}
@@ -7925,7 +7928,7 @@ void idMultiplayerGame::ToggleSpectate( void ) {
  		if ( gameLocal.serverInfo.GetBool( "si_spectators" ) ) {
  			cvarSystem->SetCVarString( "ui_spectate", "Spectate" );
    		} else {
- 			gameLocal.mpGame.AddChatLine( common->GetLocalizedString( "#str_106747" ) );
+			gameLocal.mpGame.AddChatLine( "%s", common->GetLocalizedString( "#str_106747" ) );
    		}
    	}
 }
@@ -8228,7 +8231,7 @@ void idMultiplayerGame::ClientVoiceMute( int muteClient, bool mute ) {
 		return;
 	}
 
-	if ( muteClient == -1 || !gameLocal.mpGame.IsInGame( muteClient ) ) {
+	if ( muteClient < 0 || muteClient >= MAX_CLIENTS || !gameLocal.mpGame.IsInGame( muteClient ) ) {
 		gameLocal.Warning( "idMultiplayerGame::ClientVoiceMute() - Invalid client '%d' specified", muteClient );
 		return;
 	}

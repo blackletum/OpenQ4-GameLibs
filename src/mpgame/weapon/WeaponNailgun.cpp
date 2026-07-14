@@ -94,6 +94,10 @@ rvWeaponNailgun::rvWeaponNailgun
 ================
 */
 rvWeaponNailgun::rvWeaponNailgun ( void ) {
+	guideTime = 0;
+	guideStartTime = 0;
+	guideLocked = false;
+	jointGuideEnt = INVALID_JOINT;
 }
 
 /*

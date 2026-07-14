@@ -610,6 +610,10 @@ rvVehicleWeapon::rvVehicleWeapon ( void ) {
 	hitScanDef		= NULL;
 	projectileDef	= NULL;
 	animNum			= 0;
+	animChannel		= 0;
+	muzzleFlashHandle = -1;
+	muzzleFlashEnd	= 0;
+	muzzleFlashTime	= 0;
 }
 
 /*
@@ -658,6 +662,9 @@ void rvVehicleWeapon::Spawn ( void ) {
 	chargeTime		 	= SEC2MS ( spawnArgs.GetFloat ( "chargetime" ) );
 	currentAmmo	 		= ammoPerCharge;
 	muzzleFlashHandle	= -1;
+	muzzleFlashEnd		= 0;
+	muzzleFlashTime		= SEC2MS ( spawnArgs.GetFloat ( "flashTime", "0.25" ) );
+	animChannel			= 0;
 	
 	if( spawnArgs.GetString("anim", "", temp) && *temp ) {
 		animNum = parent->GetAnimator()->GetAnim( temp );

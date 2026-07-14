@@ -3250,7 +3250,7 @@ struct rvObstacle {
 			// Negative nodeNum signifies a Leaf Area
 			if ( nodeNum < 0 ) {
 				if ( searchFile->GetArea(-nodeNum).flags&AREA_REACHABLE_WALK ) {
-					areas.AddUnique( (aasArea_t *)&searchFile->GetArea(-nodeNum) );
+					areas.AddUnique( &searchFile->GetArea(-nodeNum) );
 				}
 				break;
 			}
@@ -3553,7 +3553,7 @@ struct rvObstacleFinder {
 			if (gameLocal.GetAAS(i)) {
 				idAASFile* file = gameLocal.GetAAS(i)->GetFile();
 				for (int a=0; a<file->GetNumAreas(); a++) {
-					aasArea_t* area = (aasArea_t*)&file->GetArea(a);
+					aasArea_t* area = &file->GetArea(a);
 					area->firstMarker = NULL;
 				}
 			}
@@ -3969,7 +3969,7 @@ public:
 
 				// If The Smoothed Position Is Not Blocked By An Obstacle
 				//--------------------------------------------------------
-				aasArea_t* area = (aasArea_t*)&myAAS->GetFile()->GetArea(pathAt.reach->toAreaNum);
+				aasArea_t* area = &myAAS->GetFile()->GetArea(pathAt.reach->toAreaNum);
 				for (marker=area->firstMarker; marker; marker=marker->next) {
 					if (!marker->obstacle || marker->obstacle->entity.GetEntity()==myIgnoreEntity || marker->obstacle->entity.GetEntity()==myIgnoreEntity2) {
 						continue;
@@ -4300,10 +4300,10 @@ public:
 
 		// If Edge Is Far From Start and Goal, Don't Add Verts
 		//-----------------------------------------------------
-		if (!reach->fromAreaNum!=myMove->myArea && 
-			!reach->toAreaNum!=myMove->myArea && 
-			!reach->fromAreaNum!=myMove->goalArea && 
-			!reach->toAreaNum!=myMove->goalArea && 
+		if (reach->fromAreaNum!=myMove->myArea &&
+			reach->toAreaNum!=myMove->myArea &&
+			reach->fromAreaNum!=myMove->goalArea &&
+			reach->toAreaNum!=myMove->goalArea &&
 			reach->start.Dist2XY(myMove->myPos)>22500.0f/*(250*250)*/ && reach->start.Dist2XY(myMove->goalPos)>22500.0f/*(250*250)*/) {
 			return;
 		}
@@ -4530,7 +4530,7 @@ void idAI::RVMasterMove( void ) {
 		move.myArea			= PointReachableAreaNum(move.myPos);
 		myPosMoved			= true;
 	}
-	aasArea_t*					myArea		= (aasArea_t*)&aas->GetFile()->GetArea(move.myArea);
+	aasArea_t*					myArea		= &aas->GetFile()->GetArea(move.myArea);
 
 	// Update Goal Position And Area
 	//-------------------------------

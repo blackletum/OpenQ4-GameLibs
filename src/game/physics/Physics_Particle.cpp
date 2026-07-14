@@ -98,6 +98,7 @@ rvPhysics_Particle::rvPhysics_Particle( void ) {
 	dropToFloor		= false;
 	testSolid		= false;
 	hasMaster		= false;
+	isOrientated		= false;
 	
 	SetFriction( 0.6f, 0.6f, 0.0f );
 	SetBouncyness ( 0.5f, true );

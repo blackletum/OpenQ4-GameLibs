@@ -3553,7 +3553,8 @@ struct rvObstacleFinder {
 			if (gameLocal.GetAAS(i)) {
 				idAASFile* file = gameLocal.GetAAS(i)->GetFile();
 				for (int a=0; a<file->GetNumAreas(); a++) {
-					file->GetArea(a).firstMarker = NULL;
+					aasArea_t* area = &file->GetArea(a);
+					area->firstMarker = NULL;
 				}
 			}
 		}
@@ -4299,10 +4300,10 @@ public:
 
 		// If Edge Is Far From Start and Goal, Don't Add Verts
 		//-----------------------------------------------------
-		if (!reach->fromAreaNum!=myMove->myArea && 
-			!reach->toAreaNum!=myMove->myArea && 
-			!reach->fromAreaNum!=myMove->goalArea && 
-			!reach->toAreaNum!=myMove->goalArea && 
+		if (reach->fromAreaNum!=myMove->myArea &&
+			reach->toAreaNum!=myMove->myArea &&
+			reach->fromAreaNum!=myMove->goalArea &&
+			reach->toAreaNum!=myMove->goalArea &&
 			reach->start.Dist2XY(myMove->myPos)>22500.0f/*(250*250)*/ && reach->start.Dist2XY(myMove->goalPos)>22500.0f/*(250*250)*/) {
 			return;
 		}

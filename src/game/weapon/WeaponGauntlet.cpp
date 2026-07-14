@@ -140,7 +140,13 @@ void rvWeaponGauntlet::Restore ( idRestoreGame *savefile ) {
 	
 	savefile->ReadFloat ( range );
 	
-	savefile->ReadObject ( reinterpret_cast<idClass*&>( impactEffect ) );
+	idClass* object = NULL;
+	savefile->ReadObject ( object );
+	rvClientEffect* effect = dynamic_cast<rvClientEffect*>( object );
+	if ( object && !effect ) {
+		savefile->Error( "rvWeaponGauntlet::Restore: impact effect has an invalid type" );
+	}
+	impactEffect = effect;
 	savefile->ReadInt ( impactMaterial );
 	savefile->ReadInt ( loopSound );
 }

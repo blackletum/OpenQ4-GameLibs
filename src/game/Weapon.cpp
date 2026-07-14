@@ -500,6 +500,11 @@ rvWeapon::rvWeapon ( void ) {
 	viewModel	= NULL;
 	worldModel	= NULL;
 	weaponDef	= NULL;
+	owner			= NULL;
+
+	memset ( lights, 0, sizeof(lights) );
+	memset ( lightHandles, -1, sizeof(lightHandles) );
+	flashlightOn = false;
 
 #ifdef _XENON
 	aimAssistFOV = 10.0f;

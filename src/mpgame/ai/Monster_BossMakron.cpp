@@ -241,7 +241,7 @@ rvMonsterBossMakron::rvMonsterBossMakron ( void ) {
 
 	//set up this action array
 
-
+	flagSweepDone = false;
 
 }
 

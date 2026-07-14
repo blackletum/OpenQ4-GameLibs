@@ -851,13 +851,15 @@ idStr::StripDoubleQuotes
 void idStr::StripDoubleQuotes( void ) {
 	idStr temp = *this;
 	char *string = const_cast<char *>( temp.c_str() );
+	int length = temp.Length();
 
-	if ( *string == '"' ) {
-		strcpy( string, string + 1 );
+	if ( length > 0 && *string == '"' ) {
+		memmove( string, string + 1, length );
+		length--;
 	}
 
-	if ( string[ strlen( string ) - 1 ] == '"' ) {
-		string[ strlen( string ) - 1 ] = '\0';
+	if ( length > 0 && string[ length - 1 ] == '"' ) {
+		string[ length - 1 ] = '\0';
 	}
 
 	*this = string;
@@ -1270,7 +1272,8 @@ void idStr::ScrubFileName( void )
 	StripFileExtension();
 
 	for ( i = 0; i < len; i++ ) {
-		if( !idStr::upperCaseCharacter[data[i]] && !isdigit(data[i]) ) {
+		const unsigned char character = static_cast<unsigned char>( data[i] );
+		if( !idStr::upperCaseCharacter[character] && !isdigit(character) ) {
 			data[i] = '_';
 		}
 	}

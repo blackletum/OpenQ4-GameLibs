@@ -334,6 +334,18 @@ private:
 
 //============================================================================
 
+ID_INLINE int PackEntitySpawnId( const int entitySpawnId, const int entityNumber ) {
+	const unsigned int packed = ( static_cast<unsigned int>( entitySpawnId ) << GENTITYNUM_BITS ) |
+		static_cast<unsigned int>( entityNumber );
+	return static_cast<int>( packed );
+}
+
+ID_INLINE int PackClientEntitySpawnId( const int entitySpawnId, const int entityNumber ) {
+	const unsigned int packed = ( static_cast<unsigned int>( entitySpawnId ) << CENTITYNUM_BITS ) |
+		static_cast<unsigned int>( entityNumber );
+	return static_cast<int>( packed );
+}
+
 template< class type >
 class idEntityPtr {
 public:
@@ -387,6 +399,7 @@ struct rvmGameRender_t {
 	const idMaterial* smaaBlendPostProcessMaterial;
 	bool postProcessAvailable;
 	bool smaaAvailable;
+	int forwardRenderSamples;
 	int renderTargetWidth;
 	int renderTargetHeight;
 	int videoRestartCount;
@@ -586,7 +599,7 @@ public:
 	virtual void			ServerClientBegin( int clientNum, bool isBot, const char* botName);
 	virtual void			ServerClientDisconnect( int clientNum );
 	virtual void			ServerWriteInitialReliableMessages( int clientNum );
-	virtual allowReply_t	RepeaterAllowClient( int clientId, int numClients, const char *IP, const char *guid, bool repeater, const char *password, const char *privatePassword, char reason[MAX_STRING_CHARS] ) { idStr::Copynz( reason, "#str_107239" /* zinx - FIXME - not banned... */, sizeof(reason) ); return ALLOW_NO; };
+	virtual allowReply_t	RepeaterAllowClient( int clientId, int numClients, const char *IP, const char *guid, bool repeater, const char *password, const char *privatePassword, char reason[MAX_STRING_CHARS] ) { idStr::Copynz( reason, "#str_107239" /* zinx - FIXME - not banned... */, MAX_STRING_CHARS ); return ALLOW_NO; };
 	virtual void			RepeaterClientConnect( int clientNum ) {assert(false);};
 	virtual void			RepeaterClientBegin( int clientNum ) {assert(false);};
 	virtual void			RepeaterClientDisconnect( int clientNum ) {assert(false);};
@@ -1552,7 +1565,7 @@ ID_INLINE idEntityPtr<type> &idEntityPtr<type>::operator=( type *ent ) {
 	if ( ent == NULL ) {
 		spawnId = 0;
 	} else {
-		spawnId = ( gameLocal.spawnIds[ent->entityNumber] << GENTITYNUM_BITS ) | ent->entityNumber;
+		spawnId = PackEntitySpawnId( gameLocal.spawnIds[ent->entityNumber], ent->entityNumber );
 	}
 	return *this;
 }

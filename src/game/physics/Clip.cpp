@@ -2166,7 +2166,7 @@ idClip::PrintStatistics
 void idClip::PrintStatistics( void ) {
 // RAVEN BEGIN
 // rjohnson: added trace model cache size
-	gameLocal.Printf( "t=%-3d, r=%-3d, m=%-3d, render=%-3d, contents=%-3d, contacts=%-3d, cache=%d\n",
+	gameLocal.Printf( "t=%-3d, r=%-3d, m=%-3d, render=%-3d, contents=%-3d, contacts=%-3d, cache=%zu\n",
 						numTranslations, numRotations, numMotions, numRenderModelTraces, numContents, numContacts, traceModelCache.Num() * sizeof( idTraceModel ) );
 // RAVEN END
 }

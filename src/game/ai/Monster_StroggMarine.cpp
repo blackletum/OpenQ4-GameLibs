@@ -80,6 +80,9 @@ rvMonsterStroggMarine::rvMonsterStroggMarine
 */
 rvMonsterStroggMarine::rvMonsterStroggMarine ( ) {
 	nextShootTime = 0;
+	fireAnimNum = 0;
+	spraySideRight = false;
+	sweepCount = 0;
 }
 
 void rvMonsterStroggMarine::InitSpawnArgsVariables( void )

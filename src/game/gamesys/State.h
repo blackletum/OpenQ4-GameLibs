@@ -1,18 +1,18 @@
 #ifndef __SYS_STATE_H__
 #define __SYS_STATE_H__
 
-typedef enum {
-	SRESULT_OK,				// Call was made successfully
-	SRESULT_ERROR,			// An unrecoverable error occurred
-	SRESULT_DONE,			// Done with current state, move to next
-	SRESULT_DONE_WAIT,		// Done with current state, wait a frame then move to next
-	SRESULT_WAIT,			// Wait a frame and re-run current state
-	SRESULT_IDLE,			// State thread is currently idle (ie. no states)
-	SRESULT_SETSTAGE,		// Sets the current stage of the current state and reruns the state
-							// NOTE: this has to be the last result becuase the stage is added to
-							//		 the result.
+// A fixed int underlying type makes every encoded stage/delay payload a valid
+// stateResult_t value while retaining the named protocol type.
+enum stateResult_t : int {
+	SRESULT_OK = 0,					// Call was made successfully
+	SRESULT_ERROR = 1,				// An unrecoverable error occurred
+	SRESULT_DONE = 2,				// Done with current state, move to next
+	SRESULT_DONE_WAIT = 3,			// Done with current state, wait a frame then move to next
+	SRESULT_WAIT = 4,				// Wait a frame and re-run current state
+	SRESULT_IDLE = 5,				// State thread is currently idle (ie. no states)
+	SRESULT_SETSTAGE = 6,			// Sets the current stage and reruns the state
 	SRESULT_SETDELAY = SRESULT_SETSTAGE + 20
-} stateResult_t;
+};
 
 #define MAX_STATE_CALLS		50
 

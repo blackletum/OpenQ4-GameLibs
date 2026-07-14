@@ -610,6 +610,7 @@ void idGameLocal::Clear( void ) {
 	gameRender.smaaBlendPostProcessMaterial = NULL;
 	gameRender.postProcessAvailable = false;
 	gameRender.smaaAvailable = false;
+	gameRender.forwardRenderSamples = 0;
 	gameRender.renderTargetWidth = 0;
 	gameRender.renderTargetHeight = 0;
 	gameRender.videoRestartCount = 0;
@@ -4745,7 +4746,7 @@ TIME_THIS_SCOPE("idGameLocal::RunFrame - gameDebug.BeginFrame()");
 
 		// see if a target_sessionCommand has forced a changelevel
 		if ( sessionCommand.Length() ) {
-			strncpy( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
+			idStr::Copynz( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
 			sessionCommand = "";
 			break;
 		}
@@ -8670,7 +8671,7 @@ idGameLocal::GetSpawnId
 ================
 */
 int idGameLocal::GetSpawnId( const idEntity* ent ) const {
-	return ( gameLocal.spawnIds[ ent->entityNumber ] << GENTITYNUM_BITS ) | ent->entityNumber;
+	return PackEntitySpawnId( gameLocal.spawnIds[ ent->entityNumber ], ent->entityNumber );
 }
 
 /*

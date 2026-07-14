@@ -1,14 +1,22 @@
-py = import('python').find_installation(required : true)
 cpp = meson.get_compiler('cpp')
 
 host_system = host_machine.system()
 host_cpu_family = host_machine.cpu_family()
 is_windows = host_system == 'windows'
 is_darwin = host_system == 'darwin'
+is_linux = host_system == 'linux'
 is_msvc = cpp.get_id() == 'msvc'
 
-if not is_windows and not is_darwin
-  error('openQ4-GameLibs Meson build currently supports Windows/MSVC and macOS/Clang bring-up.')
+if is_windows
+  # Windows commonly enables a non-functional Microsoft Store python3.exe
+  # application alias. Prefer the real python.exe launcher there.
+  py = find_program('python', 'python3', native : true, required : true)
+else
+  py = find_program('python3', 'python', native : true, required : true)
+endif
+
+if not is_windows and not is_darwin and not is_linux
+  error('openQ4-GameLibs Meson build supports Windows, macOS, and Linux hosts.')
 endif
 
 if is_windows and not is_msvc
@@ -19,12 +27,20 @@ if is_darwin and cpp.get_id() != 'clang'
   error('openQ4-GameLibs macOS builds require Clang.')
 endif
 
+if is_linux and not ['gcc', 'clang'].contains(cpp.get_id())
+  error('openQ4-GameLibs Linux builds require GCC or Clang.')
+endif
+
 if is_windows and not ['x86', 'x86_64'].contains(host_cpu_family)
   error('openQ4-GameLibs Windows builds currently support x86 and x64 MSVC toolchains.')
 endif
 
 if is_darwin and not ['x86_64', 'aarch64'].contains(host_cpu_family)
   error('openQ4-GameLibs macOS builds currently support x64 and arm64 Clang toolchains.')
+endif
+
+if is_linux and not ['x86_64', 'aarch64'].contains(host_cpu_family)
+  error('openQ4-GameLibs Linux builds support x64 and arm64 toolchains.')
 endif
 
 if host_cpu_family == 'x86_64'
@@ -84,13 +100,16 @@ if is_msvc
   ]
 else
   if not cpp.has_argument('-std=c++17')
-    error('openQ4-GameLibs macOS builds require C++17 compiler support.')
+    if is_darwin
+      error('openQ4-GameLibs macOS builds require C++17 compiler support.')
+    else
+      error('openQ4-GameLibs Linux builds require C++17 compiler support.')
+    endif
   endif
   common_cpp_args += ['-std=c++17']
 
   foreach compiler_arg : [
     '-fpermissive',
-    '-finput-charset=windows-1252',
     '-Wno-invalid-source-encoding',
     '-Wno-deprecated-declarations',
     '-Wno-writable-strings',
@@ -99,6 +118,26 @@ else
       common_cpp_args += compiler_arg
     endif
   endforeach
+endif
+
+if is_linux
+  foreach compile_arg : [
+    '-fstack-protector-strong',
+    '-D_FORTIFY_SOURCE=2',
+    '-fno-strict-aliasing',
+  ]
+    if cpp.has_argument(compile_arg)
+      common_cpp_args += compile_arg
+    endif
+  endforeach
+
+  # Game modules consume engine-owned polymorphic interfaces whose key
+  # functions and RTTI live in the executable. UBSan's vptr metadata therefore
+  # cannot satisfy the modules' -z defs link contract across this DSO boundary.
+  # Keep AddressSanitizer and every other requested UBSan check enabled.
+  if cpp.has_argument('-fno-sanitize=vptr')
+    common_cpp_args += ['-fno-sanitize=vptr']
+  endif
 endif
 
 game_forced_include_args = is_msvc ? [
@@ -129,6 +168,8 @@ if is_windows
   ]
 elif is_darwin
   common_defines += ['MACOS_X=1']
+elif is_linux
+  common_defines += ['ID_GL_HARDLINK']
 endif
 
 if release_like
@@ -190,10 +231,12 @@ idlib = static_library(
   include_directories : source_inc,
   cpp_args : common_cpp_args + common_define_args + [game_dll_define_arg],
   pic : not is_windows,
+  gnu_symbol_visibility : is_linux ? 'hidden' : 'default',
   install : false,
 )
 
 module_link_args = []
+module_link_depends = []
 if is_windows
   module_link_args = [
     '/FIXED:NO',
@@ -225,6 +268,26 @@ elif is_darwin
       module_link_args += link_arg
     endif
   endforeach
+elif is_linux
+  foreach link_arg : [
+    '-Wl,-z,relro',
+    '-Wl,-z,now',
+    '-Wl,-z,noexecstack',
+    '-Wl,-z,defs',
+  ]
+    if cpp.has_link_argument(link_arg)
+      module_link_args += link_arg
+    endif
+  endforeach
+  linux_game_module_export_map = files('../tools/build/linux_game_module.map')
+  linux_game_module_export_map_path = join_paths(
+    meson.project_source_root(),
+    'tools',
+    'build',
+    'linux_game_module.map',
+  )
+  module_link_args += '-Wl,--version-script=' + linux_game_module_export_map_path
+  module_link_depends += linux_game_module_export_map
 endif
 
 if get_option('build_spgame')
@@ -268,6 +331,19 @@ if get_option('build_spgame')
       link_args : module_link_args + ['-Wl,-install_name,@loader_path/' + sp_module_name + '.dylib'],
       name_prefix : '',
       name_suffix : 'dylib',
+      install : false,
+    )
+  elif is_linux
+    shared_module(
+      sp_module_name,
+      game_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [game_dll_define_arg] + game_forced_include_args,
+      link_args : module_link_args,
+      link_depends : module_link_depends,
+      gnu_symbol_visibility : 'hidden',
+      name_prefix : '',
       install : false,
     )
   endif
@@ -320,6 +396,22 @@ if get_option('build_mpgame')
       link_args : module_link_args + ['-Wl,-install_name,@loader_path/' + mp_module_name + '.dylib'],
       name_prefix : '',
       name_suffix : 'dylib',
+      install : false,
+    )
+  elif is_linux
+    shared_module(
+      mp_module_name,
+      mpgame_sources,
+      include_directories : source_inc,
+      link_with : idlib,
+      cpp_args : common_cpp_args + common_define_args + [
+        game_dll_define_arg,
+        game_mpapi_define_arg,
+      ] + game_forced_include_args,
+      link_args : module_link_args,
+      link_depends : module_link_depends,
+      gnu_symbol_visibility : 'hidden',
+      name_prefix : '',
       install : false,
     )
   endif

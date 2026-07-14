@@ -3690,7 +3690,7 @@ void idAI::OnDeath( void ){
 
 		memset( &usercmd, 0, sizeof( usercmd ) );
 		usercmd.buttons = BUTTON_ATTACK;
-		usercmd.upmove = 300.0f; // This will cause the character to eject.
+		usercmd.upmove = 127; // Full upward input causes the character to eject.
 
 		vehicleController.SetInput( usercmd, idAngles( 0, 0, 0 ) );
 

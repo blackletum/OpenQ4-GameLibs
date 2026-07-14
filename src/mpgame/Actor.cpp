@@ -466,6 +466,8 @@ idActor::idActor( void )
 	flashlightHandle = -1;
 
 	deathPushTime	= 0;
+	deathPushForce.Zero();
+	deathPushJoint	= INVALID_JOINT;
 	
 	lightningEffects = 0;
 	lightningNextTime = 0;

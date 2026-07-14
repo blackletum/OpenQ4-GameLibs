@@ -2043,7 +2043,9 @@ int idSplinePath::SortTargets( idList< idEntityPtr<idEntity> >& list ) {
 
 	RemoveNullTargets();
 
-	qsort( list.Ptr(), list.Num(), list.TypeSize(), rvSortByActiveState );
+	if ( list.Num() > 1 ) {
+		qsort( list.Ptr(), list.Num(), list.TypeSize(), rvSortByActiveState );
+	}
 	for( int ix = list.Num() - 1; ix >= 0; --ix ) {
 		target = static_cast<idSplinePath*>( list[ix].GetEntity() );
 		if( target->IsActive() ) {

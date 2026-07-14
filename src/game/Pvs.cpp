@@ -865,15 +865,15 @@ idPVS::Shutdown
 */
 void idPVS::Shutdown( void ) {
 	if ( connectedAreas ) {
-		delete connectedAreas;
+		delete[] connectedAreas;
 		connectedAreas = NULL;
 	}
 	if ( areaQueue ) {
-		delete areaQueue;
+		delete[] areaQueue;
 		areaQueue = NULL;
 	}
 	if ( areaPVS ) {
-		delete areaPVS;
+		delete[] areaPVS;
 		areaPVS = NULL;
 	}
 	if ( currentPVS ) {
@@ -883,7 +883,7 @@ void idPVS::Shutdown( void ) {
 //          them.  This prevents a call through the unified allocator before it has been initialized
 			if(currentPVS[i].pvs)
 			{
-				delete currentPVS[i].pvs;
+				delete[] currentPVS[i].pvs;
 			}
 // RAVEN END
 			currentPVS[i].pvs = NULL;

@@ -600,9 +600,28 @@ rvAASTacticalSensorLocal::~rvAASTacticalSensorLocal()
 ///////////////////////////////////////////////////////////////////////////////
 void			rvAASTacticalSensorLocal::Clear()
 {
+	mFlagsMatchAny			= 0;
+	mFlagsMatchAll			= 0;
+	mFlagsMatchNone			= 0;
+	mFeaturesSearchMax		= 0;
+	mFeaturesFinalMax		= 0;
+	mFromOwner.Reset();
+	mFromEnemy.Reset();
+	mFromTether.Reset();
+	mFromPath.Reset();
+	mAdvance.Reset();
+	mAssignment.Reset();
+	mLeanNormal.Reset();
+	mAssignmentDirection	= vec3_zero;
+	mAssignmentValid		= false;
+	mEnemyOverride			= NULL;
+
 	mReserved				= 0;
+	mReservedOrigin			= vec3_zero;
 	mNear					= 0;
 	mLook					= 0;
+	mLookStartTime			= 0;
+	mLookStopDist			= 0.0f;
 	mSearchName				= "";
 	mFeatures.Clear();
 }

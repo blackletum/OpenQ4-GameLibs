@@ -2292,7 +2292,9 @@ bool rvTramCar::Look( const idFrustum& fov, idList<rvSplineMover*>& list ) const
 		list[ix]->spawnArgs.SetFloat( "distAway", (list[ix]->GetPhysics()->GetOrigin() - GetPhysics()->GetOrigin()).Length() );
 	}
 
-	qsort( list.Ptr(), list.Num(), list.TypeSize(), rvSortByDist );
+	if ( list.Num() > 1 ) {
+		qsort( list.Ptr(), list.Num(), list.TypeSize(), rvSortByDist );
+	}
 
 	// Do we need to get rid of these keyvalues?
 

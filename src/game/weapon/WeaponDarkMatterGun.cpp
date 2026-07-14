@@ -133,8 +133,21 @@ void rvWeaponDarkMatterGun::Restore ( idRestoreGame *savefile ) {
 	savefile->ReadInt ( nextRotateTime );
 	savefile->ReadInt ( ringStartTime );
 	savefile->ReadInt ( chargeDuration );
-	savefile->ReadObject( reinterpret_cast<idClass*&>( coreEffect ) );
-	savefile->ReadObject( reinterpret_cast<idClass*&>( coreStartEffect ) );
+	idClass* object = NULL;
+	savefile->ReadObject( object );
+	rvClientEffect* effect = dynamic_cast<rvClientEffect*>( object );
+	if ( object && !effect ) {
+		savefile->Error( "rvWeaponDarkMatterGun::Restore: core effect has an invalid type" );
+	}
+	coreEffect = effect;
+
+	object = NULL;
+	savefile->ReadObject( object );
+	effect = dynamic_cast<rvClientEffect*>( object );
+	if ( object && !effect ) {
+		savefile->Error( "rvWeaponDarkMatterGun::Restore: core start effect has an invalid type" );
+	}
+	coreStartEffect = effect;
 	savefile->ReadJoint ( jointCore );
 }
 

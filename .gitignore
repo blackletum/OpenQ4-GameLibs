@@ -40,6 +40,11 @@ meson-info/
 .ninja_deps
 compile_commands.json
 
+# Local validation scratch and Python caches
+.tmp/
+__pycache__/
+*.py[cod]
+
 # Legacy Visual Studio generated files
 Win32/
 src/.vs/

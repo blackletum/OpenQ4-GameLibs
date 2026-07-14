@@ -590,6 +590,9 @@ idSIMD_Generic::Memcpy
 */
 void VPCALL idSIMD_Generic::Memcpy( void * RESTRICT dst, const void * RESTRICT src, const int count ) {
 	TIME_THIS_SCOPE("SIMD Memcpy");
+	if ( count <= 0 ) {
+		return;
+	}
 	memcpy( dst, src, count );
 }
 
@@ -600,6 +603,9 @@ idSIMD_Generic::Memset
 */
 void VPCALL idSIMD_Generic::Memset( void * RESTRICT dst, const int val, const int count ) {
 	TIME_THIS_SCOPE("SIMD Memset");
+	if ( count <= 0 ) {
+		return;
+	}
 	memset( dst, val, count );
 }
 
@@ -610,6 +616,9 @@ idSIMD_Generic::Zero16
 */
 void VPCALL idSIMD_Generic::Zero16( float * RESTRICT dst, const int count ) {
 	TIME_THIS_SCOPE("SIMD Zero16");
+	if ( count <= 0 ) {
+		return;
+	}
 	memset( dst, 0, count * sizeof( float ) );
 }
 
@@ -1817,7 +1826,7 @@ void VPCALL idSIMD_Generic::MatX_LowerTriangularSolve( const idMatX &L, float * 
 	lptr = L[skip];
 
 	int i, j;
-	register double s0, s1, s2, s3;
+	double s0, s1, s2, s3;
 
 	for ( i = skip; i < n; i++ ) {
 		s0 = lptr[0] * x[0];
@@ -1942,7 +1951,7 @@ void VPCALL idSIMD_Generic::MatX_LowerTriangularSolveTranspose( const idMatX &L,
 	}
 
 	int i, j;
-	register double s0, s1, s2, s3;
+	double s0, s1, s2, s3;
 	float * RESTRICT xptr;
 
 	lptr = L.ToFloatPtr() + n * nc + n - 4;
@@ -2610,7 +2619,7 @@ void VPCALL idSIMD_Generic::DeriveTangents( idPlane * RESTRICT planes, idDrawVer
 	idPlane * RESTRICT planesPtr = planes;
 	for ( i = 0; i < numIndexes; i += 3 ) {
 		idDrawVert * RESTRICT a, * RESTRICT b, * RESTRICT c;
-		unsigned long signBit;
+		unsigned int signBit;
 		float d0[5], d1[5], f, area;
 		idVec3 n, t0, t1;
 
@@ -2651,7 +2660,7 @@ void VPCALL idSIMD_Generic::DeriveTangents( idPlane * RESTRICT planes, idDrawVer
 
 		// area sign bit
 		area = d0[3] * d1[4] - d0[4] * d1[3];
-		signBit = ( *(unsigned long *)&area ) & ( 1 << 31 );
+		signBit = idMath_FloatBits( area ) & ( 1u << 31 );
 
 		// first tangent
 		t0[0] = d0[0] * d1[4] - d0[4] * d1[0];
@@ -2659,7 +2668,7 @@ void VPCALL idSIMD_Generic::DeriveTangents( idPlane * RESTRICT planes, idDrawVer
 		t0[2] = d0[2] * d1[4] - d0[4] * d1[2];
 
 		f = idMath::RSqrt( t0.x * t0.x + t0.y * t0.y + t0.z * t0.z );
-		*(unsigned long *)&f ^= signBit;
+		f = idMath_FloatXorBits( f, signBit );
 
 		t0.x *= f;
 		t0.y *= f;
@@ -2671,7 +2680,7 @@ void VPCALL idSIMD_Generic::DeriveTangents( idPlane * RESTRICT planes, idDrawVer
 		t1[2] = d0[3] * d1[2] - d0[2] * d1[3];
 
 		f = idMath::RSqrt( t1.x * t1.x + t1.y * t1.y + t1.z * t1.z );
-		*(unsigned long *)&f ^= signBit;
+		f = idMath_FloatXorBits( f, signBit );
 
 		t1.x *= f;
 		t1.y *= f;

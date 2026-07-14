@@ -30,7 +30,7 @@ This file describes project goals, rules, and upstream credits for anyone workin
 - Keep credits accurate and append attributions for newly integrated upstream/third-party work.
 
 **Development Procedure (Recommended)**
-1. Build game libraries with Meson/Ninja (`powershell -ExecutionPolicy Bypass -File tools/build/meson_setup.ps1 setup --wipe builddir . --backend ninja --buildtype release --vsenv`, then `... meson_setup.ps1 compile -C builddir`).
+1. Build game libraries with Meson/Ninja. On Windows use `tools/build/meson_setup.ps1`; on Linux/macOS use `meson setup --wipe builddir . --backend ninja --buildtype release`, then `meson compile -C builddir`.
 2. Validate behavior using openQ4 (`E:\Repositories\openQ4`) against original Quake 4 assets.
 3. Review runtime logs in the active Quake 4 install.
 4. Iterate until compatibility and stability targets are met.
@@ -38,7 +38,8 @@ This file describes project goals, rules, and upstream credits for anyone workin
 **Cross-Repo Workflow (Agent-Only)**
 - openQ4 (`tools/build/meson_setup.ps1`) can trigger this repo's standalone build during openQ4 compile runs when `OPENQ4_BUILD_GAMELIBS=1`.
 - openQ4 consumes this repository as the canonical source-input repository for SDK/game-library code and stages the files it needs during the engine build.
-- Linux standalone module builds are intentionally not supported here until an explicit cross-repo decision adds them; validate Linux modules through openQ4's staged engine build.
+- Keep standalone Linux x64 and arm64 SP/MP module builds supported alongside the openQ4 staged engine build.
+- Keep native Linux x64 and arm64 build checks here so portability regressions are caught before openQ4 stages these sources.
 - Do not maintain or edit an openQ4 `src/game` mirror; apply canonical game-library source edits here first.
 
 **Local References (Agent-Only, Not Included In Repo)**

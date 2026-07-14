@@ -53,7 +53,7 @@ the data and converts bytes into longwords for this routine.
 =================
 */
 void MD5_Transform( unsigned int state[4], unsigned int const in[16] ) {
-    register unsigned int a, b, c, d;
+    unsigned int a, b, c, d;
 
     a = state[0];
     b = state[1];
@@ -249,7 +249,7 @@ void MD5_Final( MD5_CTX *ctx, unsigned char digest[16] ) {
 
     MD5_Transform( ctx->state, (unsigned int *) ctx->in );
     memcpy( digest, ctx->state, 16 );
-    memset( ctx, 0, sizeof( ctx ) );        /* In case it's sensitive */
+    memset( ctx, 0, sizeof( *ctx ) );        /* In case it's sensitive */
 }
 
 /*
@@ -258,8 +258,9 @@ MD5_BlockChecksum
 ===============
 */
 unsigned long MD5_BlockChecksum( const void *data, int length ) {
-	unsigned long	digest[4];
-	unsigned long	val;
+	static_assert( sizeof( unsigned int ) == 4, "MD5 requires 32-bit digest words" );
+	unsigned int	digest[4];
+	unsigned int	val;
 	MD5_CTX			ctx;
 
 	MD5_Init( &ctx );

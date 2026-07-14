@@ -1386,6 +1386,7 @@ idPlayer::idPlayer() {
 	focusType				= FOCUS_NONE;
 	focusBrackets			= NULL;
 	focusBracketsTime		= 0;
+	targetFriendly			= false;
 
 	talkingNPC				= NULL;
 
@@ -1470,6 +1471,7 @@ idPlayer::idPlayer() {
 	connectTime = 0;
 	rank = -1;
 	arena = 0;
+	emote = PE_NONE;
 
 	memset( nextAmmoRegenPulse, 0, sizeof( int ) * MAX_AMMO );
 
@@ -5629,7 +5631,9 @@ idPlayer::GiveWeaponMods
 ===============
 */
 bool idPlayer::GiveWeaponMods( int mods ) {
-	inventory.weaponMods[currentWeapon] |= mods;
+	if ( currentWeapon >= 0 && currentWeapon < MAX_WEAPONS ) {
+		inventory.weaponMods[currentWeapon] |= mods;
+	}
 	currentWeapon = -1;
 	
 	return true;
@@ -5641,6 +5645,9 @@ idPlayer::GiveWeaponMods
 ===============
 */
 bool idPlayer::GiveWeaponMods( int weapon, int mods ) {
+	if ( weapon < 0 || weapon >= MAX_WEAPONS ) {
+		return false;
+	}
 	inventory.weaponMods[weapon] |= mods;
 	currentWeapon = -1;
 
@@ -5675,6 +5682,10 @@ void idPlayer::GiveWeaponMod ( const char* weaponmod ) {
 	}
 	
 	weaponIndex = SlotForWeapon ( weaponClass );
+	if ( weaponIndex < 0 || weaponIndex >= MAX_WEAPONS ) {
+		gameLocal.Warning ( "Weapon classname '%s' specified on weapon modification '%s' has no player slot", weaponClass, weaponmod );
+		return;
+	}
 
 	// Find the index of the weapon mod
 	for ( m = 0; m < MAX_WEAPONMODS; m ++ ) {		
@@ -10177,7 +10188,7 @@ void idPlayer::Think( void ) {
 	DrawShadow( headRenderEnt );
 
 	// Never cast shadows from our first-person muzzle flash or flashlight.
-	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : rvWeapon::WPLIGHT_MUZZLEFLASH * 100 + entityNumber;
+	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : ( rvWeapon::WPLIGHT_MUZZLEFLASH + 1 ) * 100 + entityNumber;
 	renderEntity.suppressShadowInLightID = suppressShadowLightId;
 	if ( headRenderEnt ) {
  		headRenderEnt->suppressShadowInLightID = suppressShadowLightId;
@@ -12497,7 +12508,7 @@ void idPlayer::LocalClientPredictionThink( void ) {
 	DrawShadow( headRenderEnt );
 
 	// Never cast shadows from our first-person muzzle flash or flashlight.
-	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : rvWeapon::WPLIGHT_MUZZLEFLASH * 100 + entityNumber;
+	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : ( rvWeapon::WPLIGHT_MUZZLEFLASH + 1 ) * 100 + entityNumber;
 	renderEntity.suppressShadowInLightID = suppressShadowLightId;
 	if ( headRenderEnt ) {
  		headRenderEnt->suppressShadowInLightID = renderEntity.suppressShadowInLightID;
@@ -12676,7 +12687,7 @@ void idPlayer::NonLocalClientPredictionThink( void ) {
 	DrawShadow( headRenderEnt );
 
 	// Never cast shadows from our first-person muzzle flash or flashlight.
-	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : rvWeapon::WPLIGHT_MUZZLEFLASH * 100 + entityNumber;
+	const int suppressShadowLightId = weapon ? weapon->GetFirstPersonShadowSuppressLightId() : ( rvWeapon::WPLIGHT_MUZZLEFLASH + 1 ) * 100 + entityNumber;
 	renderEntity.suppressShadowInLightID = suppressShadowLightId;
 	if ( headRenderEnt ) {
  		headRenderEnt->suppressShadowInLightID = renderEntity.suppressShadowInLightID;
@@ -14730,7 +14741,7 @@ bool idPlayer::AllowedVoiceDest( int from ) {
 
 	if( free > -1 ) {
 		voiceDest[free] = from;
-		voiceDestTimes[i] = gameLocal.time;
+		voiceDestTimes[free] = gameLocal.time;
 		return true;
 	}
 

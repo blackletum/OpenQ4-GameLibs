@@ -540,7 +540,7 @@ idCVar g_showDebugHud(				"g_showDebugHud",			"0",			CVAR_GAME | CVAR_INTEGER, "
 																										  "8  = AI performance\n"
 																										  "9  = MP\n"
 																										  "10 = Sound\n"
-																										  "32 = scratch\n" );
+																				  "32 = scratch\n", 0, 32, idCmdSystem::ArgCompletion_Integer<0,32> );
 // bdube: cvar for messing with foreshortening and gun position
 idCVar g_gun_pitch(					"g_gunPitch",				"0",			CVAR_GAME | CVAR_FLOAT,		"" );
 idCVar g_gun_yaw(					"g_gunYaw",					"0",			CVAR_GAME | CVAR_FLOAT,		"" );

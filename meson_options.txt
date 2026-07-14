@@ -2,14 +2,14 @@ option(
   'build_spgame',
   type : 'boolean',
   value : true,
-  description : 'Build the single-player game module (game-sp_<arch>.dll/.dylib).',
+  description : 'Build the single-player game module (game-sp_<arch>.dll/.so/.dylib).',
 )
 
 option(
   'build_mpgame',
   type : 'boolean',
   value : true,
-  description : 'Build the multiplayer game module (game-mp_<arch>.dll/.dylib).',
+  description : 'Build the multiplayer game module (game-mp_<arch>.dll/.so/.dylib).',
 )
 
 option(

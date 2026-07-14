@@ -127,7 +127,7 @@ def validate_savegame_object_serialization(tree: str) -> None:
 
     for token in (
         "void idSaveGame::WriteObject( const idClass *obj )",
-        "index = objects.FindIndex( obj );",
+        "index = SaveGame_FindObjectIndex( objects, objectHash, obj );",
         "WriteInt( index );",
         "void idRestoreGame::ReadObject( idClass *&obj )",
         "ReadInt( index );",

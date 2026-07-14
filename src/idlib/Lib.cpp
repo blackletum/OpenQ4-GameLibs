@@ -2,8 +2,11 @@
 #include "precompiled.h"
 #pragma hdrstop
 
-#if defined( MACOS_X )
+#if defined( MACOS_X ) || defined( __linux__ )
 #include <signal.h>
+#endif
+
+#if defined( MACOS_X )
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -394,7 +397,7 @@ RESULTS
    Reverses the byte order in each of elcount elements.
 ===================================================================== */
 void RevBytesSwap( void *bp, int elsize, int elcount ) {
-	register unsigned char *p, *q;
+	unsigned char *p, *q;
 
 	p = ( unsigned char * ) bp;
 
@@ -497,9 +500,11 @@ Swap_Init
 */
 void Swap_Init( void ) {
 	byte	swaptest[2] = {1,0};
+	unsigned short swapvalue;
+	memcpy( &swapvalue, swaptest, sizeof( swapvalue ) );
 
 	// set the byte swapping variables in a portable manner	
-	if ( *(short *)swaptest == 1) {
+	if ( swapvalue == 1 ) {
 		// little endian ex: x86
 		_BigShort = ShortSwap;
 		_LittleShort = ShortNoSwap;
@@ -533,7 +538,9 @@ Swap_IsBigEndian
 */
 bool Swap_IsBigEndian( void ) {
 	byte	swaptest[2] = {1,0};
-	return *(short *)swaptest != 1;
+	unsigned short swapvalue;
+	memcpy( &swapvalue, swaptest, sizeof( swapvalue ) );
+	return swapvalue != 1;
 }
 
 /*
@@ -554,7 +561,7 @@ void AssertFailed( const char *file, int line, const char *expression ) {
 	__debugbreak();
 // RAVEN END
 #elif defined( __linux__ )
-	__asm__ __volatile__ ("int $0x03");
+	raise( SIGTRAP );
 #elif defined( MACOS_X )
 	kill( getpid(), SIGINT );
 #endif

@@ -1136,7 +1136,7 @@ void idAnimManager::PrintMemInfo( MemInfo *mi ) {
 			size += anim->Size();
 			num++;
 
-			f->Printf( "%8d: %s\n", anim->Size(), anim->Name() );
+			f->Printf( "%8zu: %s\n", anim->Size(), anim->Name() );
 		}
 	}
 

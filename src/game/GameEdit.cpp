@@ -1149,7 +1149,7 @@ int idGameEdit::EntityToSafeId ( idEntity* ent ) const {
 	if ( !ent ) {
 		return 0;
 	}
-	return ( gameLocal.spawnIds[ent->entityNumber] << GENTITYNUM_BITS ) | ent->entityNumber;
+	return PackEntitySpawnId( gameLocal.spawnIds[ent->entityNumber], ent->entityNumber );
 }
 
 /*
@@ -1408,7 +1408,7 @@ void idGameEdit::MapSave( const char *path ) const {
 					fileSystem->CloseFile ( file );
 					mapFile->Write ( osPath, ".map", false );
 				} else {
-					mapFile->Write ( file->GetName(), ".map" );
+					mapFile->Write ( osPath, ".map" );
 				}
 			}				
 		}
@@ -1783,7 +1783,7 @@ const char* idGameEdit::ScriptGetRegisterValue ( idInterpreter* interpreter, con
 	
 	value[0] = '\0';
 	if ( interpreter->GetRegisterValue ( varname, out, callstackDepth ) ) {	
-		idStr::snPrintf ( value, 4095, out.c_str() );	
+		idStr::snPrintf ( value, 4095, "%s", out.c_str() );
 	}
 	
 	return value;

@@ -898,6 +898,7 @@ void idGameLocal::ShutdownGameRenderSystem( void ) {
 	gameRender.smaaBlendPostProcessMaterial = NULL;
 	gameRender.postProcessAvailable = false;
 	gameRender.smaaAvailable = false;
+	gameRender.forwardRenderSamples = 0;
 	gameRender.renderTargetWidth = 0;
 	gameRender.renderTargetHeight = 0;
 	gameRender.videoRestartCount = ( renderSystem != NULL ) ? renderSystem->GetVideoRestartCount() : 0;
@@ -916,6 +917,90 @@ are presented on screen based on whatever is going on in game.
 =======================================
 */
 
+static int openQ4_NextLowerMSAASampleCount( int samples ) {
+	if ( samples > 8 ) {
+		return 8;
+	}
+	if ( samples > 4 ) {
+		return 4;
+	}
+	if ( samples > 2 ) {
+		return 2;
+	}
+	return 0;
+}
+
+static idRenderTexture* openQ4_CreateForwardRenderTarget( int requestedSamples, int& effectiveSamples ) {
+	effectiveSamples = 0;
+	int attemptSamples = Max( 0, requestedSamples );
+
+	for ( ;; ) {
+		idImageOpts albedoOpts;
+		// The legacy Quake 4 light stack depends on LDR framebuffer clamping
+		// between blend/light-scale passes. Keep the game-level post chain LDR
+		// so post AA preserves stock scene color instead of creating an HDR path.
+		albedoOpts.format = FMT_RGBA8;
+		albedoOpts.colorFormat = CFM_DEFAULT;
+		albedoOpts.numLevels = 1;
+		albedoOpts.textureType = TT_2D;
+		albedoOpts.isPersistant = true;
+		albedoOpts.width = renderSystem->GetScreenWidth();
+		albedoOpts.height = renderSystem->GetScreenHeight();
+		albedoOpts.numMSAASamples = attemptSamples;
+
+		idImage* albedoImage = renderSystem->CreateImage( "_forwardRenderAlbedo", &albedoOpts, TF_LINEAR );
+
+		idImageOpts depthOpts = albedoOpts;
+		depthOpts.format = FMT_DEPTH_STENCIL;
+		depthOpts.numMSAASamples = attemptSamples;
+		idImage* depthImage = renderSystem->CreateImage( "_forwardRenderDepth", &depthOpts, TF_LINEAR );
+
+		if ( albedoImage == NULL || depthImage == NULL ) {
+			common->Warning( "Forward render target image allocation failed; falling back to direct rendering." );
+			return NULL;
+		}
+
+		const int colorSamples = Max( 0, renderSystem->GetImageMSAASamples( albedoImage ) );
+		const int depthSamples = Max( 0, renderSystem->GetImageMSAASamples( depthImage ) );
+		if ( colorSamples != depthSamples ) {
+			common->Warning(
+				"Forward render target attachments disagree on MSAA (%d color, %d depth); retrying lower.",
+				colorSamples,
+				depthSamples );
+			// Retry the next step below the larger allocated count. Using the
+			// smaller count would skip a potentially compatible tier: for example,
+			// a 4x color image paired with an 8x depth image should retry 4x,
+			// rather than dropping directly to 2x.
+			attemptSamples = openQ4_NextLowerMSAASampleCount( Max( colorSamples, depthSamples ) );
+			if ( attemptSamples <= 0 && ( colorSamples > 0 || depthSamples > 0 ) ) {
+				continue;
+			}
+			if ( attemptSamples <= 0 ) {
+				break;
+			}
+			continue;
+		}
+
+		const int allocatedSamples = colorSamples;
+		idRenderTexture* renderTarget = renderSystem->CreateRenderTexture( albedoImage, depthImage );
+		if ( renderTarget != NULL ) {
+			effectiveSamples = allocatedSamples;
+			return renderTarget;
+		}
+
+		common->Warning(
+			"Forward render target creation failed at %d MSAA samples; retrying lower.",
+			allocatedSamples );
+		if ( allocatedSamples <= 0 ) {
+			break;
+		}
+		attemptSamples = openQ4_NextLowerMSAASampleCount( allocatedSamples );
+	}
+
+	common->Warning( "Forward render targets are unavailable; falling back to direct rendering." );
+	return NULL;
+}
+
 /*
 ========================
 idGameLocal::InitGameRenderSystem
@@ -932,28 +1017,9 @@ void idGameLocal::InitGameRenderSystem(void) {
 
 	const int requestedMsaaSamples = Max( 0, cvarSystem->GetCVarInteger( "r_multiSamples" ) );
 
-	{
-		idImageOpts opts;
-		// The legacy Quake 4 light stack depends on LDR framebuffer clamping
-		// between blend/light-scale passes. Keep the game-level post chain LDR
-		// so post AA preserves stock scene color instead of creating an HDR path.
-		opts.format = FMT_RGBA8;
-		opts.colorFormat = CFM_DEFAULT;
-		opts.numLevels = 1;
-		opts.textureType = TT_2D;
-		opts.isPersistant = true;
-		opts.width = renderSystem->GetScreenWidth();
-		opts.height = renderSystem->GetScreenHeight();
-		opts.numMSAASamples = requestedMsaaSamples;
-
-		idImage *albedoImage = renderSystem->CreateImage("_forwardRenderAlbedo", &opts, TF_LINEAR);
-
-		opts.numMSAASamples = requestedMsaaSamples;
-		opts.format = FMT_DEPTH_STENCIL;
-		idImage *depthImage = renderSystem->CreateImage("_forwardRenderDepth", &opts, TF_LINEAR);
-
-		gameRender.forwardRenderPassRT = renderSystem->CreateRenderTexture(albedoImage, depthImage);
-	}
+	gameRender.forwardRenderPassRT = openQ4_CreateForwardRenderTarget(
+		requestedMsaaSamples,
+		gameRender.forwardRenderSamples );
 
 	for(int i = 0; i < 3; i++)
 	{
@@ -1017,9 +1083,10 @@ void idGameLocal::InitGameRenderSystem(void) {
 		common->Warning("Postprocess materials missing or invalid; falling back to direct render.");
 	}
 
-	if ( requestedMsaaSamples > 0 ) {
-		common->Printf( "MSAA requested %d samples\n", requestedMsaaSamples );
-	}
+	common->Printf(
+		"Forward render target MSAA: requested %d, effective %d\n",
+		requestedMsaaSamples,
+		gameRender.forwardRenderSamples );
 
 	gameRender.renderTargetWidth = renderSystem->GetScreenWidth();
 	gameRender.renderTargetHeight = renderSystem->GetScreenHeight();
@@ -1032,16 +1099,22 @@ idGameLocal::ResizeRenderTextures
 */
 void idGameLocal::ResizeRenderTextures(int width, int height) {
 	// Resize all of the different render textures.
+	bool resizeSucceeded = true;
 	if ( gameRender.forwardRenderPassRT != NULL ) {
-		renderSystem->ResizeRenderTexture( gameRender.forwardRenderPassRT, width, height );
+		resizeSucceeded = renderSystem->ResizeRenderTexture( gameRender.forwardRenderPassRT, width, height ) && resizeSucceeded;
 	}
 	if ( gameRender.forwardRenderPassResolvedRT != NULL ) {
-		renderSystem->ResizeRenderTexture( gameRender.forwardRenderPassResolvedRT, width, height );
+		resizeSucceeded = renderSystem->ResizeRenderTexture( gameRender.forwardRenderPassResolvedRT, width, height ) && resizeSucceeded;
 	}
 	for ( int i = 0; i < 3; i++ ) {
 		if ( gameRender.postProcessRT[i] != NULL ) {
-			renderSystem->ResizeRenderTexture( gameRender.postProcessRT[i], width, height );
+			resizeSucceeded = renderSystem->ResizeRenderTexture( gameRender.postProcessRT[i], width, height ) && resizeSucceeded;
 		}
+	}
+	if ( !resizeSucceeded ) {
+		common->Warning( "A resized game render target became unavailable; rebuilding the pipeline with fallbacks." );
+		InitGameRenderSystem();
+		return;
 	}
 
 	gameRender.renderTargetWidth = width;
@@ -1122,7 +1195,6 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 	//	return;
 	//}
 
-	const int requestedMsaaSamples = Max( 0, cvarSystem->GetCVarInteger( "r_multiSamples" ) );
 	const bool blurEnabled = IsSpecialEffectEnabled( SPECIAL_EFFECT_BLUR ) &&
 		( gameRender.blurPostProcessMaterial != NULL );
 	const bool wantsCAS = g_renderCasUpscale.GetBool() && gameRender.casPostProcessMaterial != NULL;
@@ -1142,7 +1214,7 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 
 	const bool canUseFastNoPost =
 		g_renderFastNoPost.GetBool() &&
-		requestedMsaaSamples <= 0 &&
+		gameRender.forwardRenderSamples <= 0 &&
 		!blurEnabled &&
 		!wantsSMAA &&
 		!wantsCAS;

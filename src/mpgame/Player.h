@@ -945,8 +945,8 @@ private:
 	int						arena;					// current arena for tourney gameplay
 
 	int						connectTime;
-	int						mutedPlayers;			// bitfield set to which clients this player wants muted
-	int						friendPlayers;			// bitfield set to which clients this player has marked as friends
+	unsigned int			mutedPlayers;			// bitfield set to which clients this player wants muted
+	unsigned int			friendPlayers;			// bitfield set to which clients this player has marked as friends
 	
 	int						voiceDest[MAX_CONCURRENT_VOICES];
 	int						voiceDestTimes[MAX_CONCURRENT_VOICES];
@@ -1251,50 +1251,56 @@ ID_INLINE const idUserInterface* idPlayer::GetHud() const {
 }
 
 ID_INLINE bool idPlayer::IsPlayerMuted( idPlayer* player ) const {
-	return !!( mutedPlayers & ( 1 << player->entityNumber ) );
+	return player != NULL && IsPlayerMuted( player->entityNumber );
 }
 
 ID_INLINE bool idPlayer::IsPlayerMuted( int clientNum ) const {
-	return !!( mutedPlayers & ( 1 << clientNum ) );
+	return clientNum >= 0 && clientNum < MAX_CLIENTS && ( mutedPlayers & ( 1u << clientNum ) ) != 0;
 }
 
 ID_INLINE void idPlayer::MutePlayer( idPlayer* player, bool mute ) {
-	if( mute ) {
-		mutedPlayers |= ( 1 << player->entityNumber );
-	} else {
-		mutedPlayers &= ~( 1 << player->entityNumber );
+	if ( player == NULL ) {
+		return;
 	}
+	MutePlayer( player->entityNumber, mute );
 }
 
 ID_INLINE void idPlayer::MutePlayer( int clientNum, bool mute ) {
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+		return;
+	}
+	const unsigned int clientMask = 1u << clientNum;
 	if( mute ) {
-		mutedPlayers |= ( 1 << clientNum );
+		mutedPlayers |= clientMask;
 	} else {
-		mutedPlayers &= ~( 1 << clientNum );
+		mutedPlayers &= ~clientMask;
 	}
 }
 
 ID_INLINE bool idPlayer::IsFriend( idPlayer* player ) const {
-	return !!( friendPlayers & ( 1 << player->entityNumber ) );
+	return player != NULL && IsFriend( player->entityNumber );
 }
 
 ID_INLINE bool idPlayer::IsFriend( int clientNum ) const {
-	return !!( friendPlayers & ( 1 << clientNum ) );
+	return clientNum >= 0 && clientNum < MAX_CLIENTS && ( friendPlayers & ( 1u << clientNum ) ) != 0;
 }
 
 ID_INLINE void idPlayer::SetFriend( idPlayer* player, bool isFriend ) {
-	if( isFriend ) {
-		friendPlayers |= ( 1 << player->entityNumber ); 
-	} else {
-		friendPlayers &= ~( 1 << player->entityNumber );
+	if ( player == NULL ) {
+		return;
 	}
+	SetFriend( player->entityNumber, isFriend );
 }
 
 ID_INLINE void idPlayer::SetFriend( int clientNum, bool isFriend ) {
+	if ( clientNum < 0 || clientNum >= MAX_CLIENTS ) {
+		return;
+	}
+	const unsigned int clientMask = 1u << clientNum;
 	if( isFriend ) {
-		friendPlayers |= ( 1 << clientNum );
+		friendPlayers |= clientMask;
 	} else {
-		friendPlayers &= ~( 1 << clientNum );
+		friendPlayers &= ~clientMask;
 	}
 }
 

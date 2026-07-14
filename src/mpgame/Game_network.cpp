@@ -54,10 +54,12 @@ void idGameLocal::InitAsyncNetwork( void ) {
 	memset( clientPVS, 0, sizeof( clientPVS ) );
 	memset( clientSnapshots, 0, sizeof( clientSnapshots ) );
 
-	memset( viewerEntityStates, 0, sizeof( *viewerEntityStates ) * maxViewers );
-	memset( viewerPVS, 0, sizeof( *viewerPVS ) * maxViewers );
-	memset( viewerSnapshots, 0, sizeof( *viewerSnapshots ) * maxViewers );
-	memset( viewerUnreliableMessages, 0, sizeof (*viewerUnreliableMessages) * maxViewers );
+	if ( maxViewers > 0 ) {
+		memset( viewerEntityStates, 0, sizeof( *viewerEntityStates ) * maxViewers );
+		memset( viewerPVS, 0, sizeof( *viewerPVS ) * maxViewers );
+		memset( viewerSnapshots, 0, sizeof( *viewerSnapshots ) * maxViewers );
+		memset( viewerUnreliableMessages, 0, sizeof( *viewerUnreliableMessages ) * maxViewers );
+	}
 
 	eventQueue.Init();
 
@@ -83,10 +85,12 @@ void idGameLocal::ShutdownAsyncNetwork( void ) {
 	memset( clientPVS, 0, sizeof( clientPVS ) );
 	memset( clientSnapshots, 0, sizeof( clientSnapshots ) );
 
-	memset( viewerEntityStates, 0, sizeof( *viewerEntityStates ) * maxViewers );
-	memset( viewerPVS, 0, sizeof( *viewerPVS ) * maxViewers );
-	memset( viewerSnapshots, 0, sizeof( *viewerSnapshots ) * maxViewers );
-	memset( viewerUnreliableMessages, 0, sizeof (*viewerUnreliableMessages) * maxViewers );
+	if ( maxViewers > 0 ) {
+		memset( viewerEntityStates, 0, sizeof( *viewerEntityStates ) * maxViewers );
+		memset( viewerPVS, 0, sizeof( *viewerPVS ) * maxViewers );
+		memset( viewerSnapshots, 0, sizeof( *viewerSnapshots ) * maxViewers );
+		memset( viewerUnreliableMessages, 0, sizeof( *viewerUnreliableMessages ) * maxViewers );
+	}
 }
 
 /*
@@ -200,7 +204,10 @@ Allocate/Reallocate space for viewers
 */
 template<typename T> static ID_INLINE void ReallocateZero( T *&var, int oldSize, int newSize ) {
 	T *new_var = newSize ? new T[ newSize ] : NULL;
-	SIMDProcessor->Memcpy( new_var, var, sizeof(*new_var) * Min( newSize, oldSize ) );
+	const int copyCount = Min( newSize, oldSize );
+	if ( copyCount > 0 ) {
+		SIMDProcessor->Memcpy( new_var, var, sizeof( *new_var ) * copyCount );
+	}
 	delete[] var;
 	var = new_var;
 	if ( newSize > oldSize ) {
@@ -509,7 +516,7 @@ void idGameLocal::ServerClientDisconnect( int clientNum ) {
 		outMsg.Init( msgBuf, sizeof( msgBuf ) );
 		outMsg.BeginWriting();
 		outMsg.WriteByte( GAME_RELIABLE_MESSAGE_DELETE_ENT );
-		outMsg.WriteBits( ( spawnIds[ clientNum ] << GENTITYNUM_BITS ) | clientNum, 32 ); // see GetSpawnId
+		outMsg.WriteBits( PackEntitySpawnId( spawnIds[ clientNum ], clientNum ), 32 ); // see GetSpawnId
 		networkSystem->ServerSendReliableMessage( -1, outMsg );
 	}
 
@@ -1154,7 +1161,7 @@ void idGameLocal::NetworkEventWarning( const entityNetEvent_t *event, const char
 	va_end( argptr );
 	idStr::Append( buf, sizeof(buf), "\n" );
 
-	common->DWarning( buf );
+	common->DWarning( "%s", buf );
 }
 
 /*
@@ -2358,7 +2365,7 @@ void idGameLocal::ClientProcessReliableMessage( int clientNum, const idBitMsg &m
 			FlushBanList( );
 			while ( msg.ReadString( name, MAX_STRING_CHARS ) && msg.ReadString( guid, MAX_STRING_CHARS ) ) {
 				banInfo.name = name;
-				strncpy( banInfo.guid, guid, CLIENT_GUID_LENGTH );
+				idStr::Copynz( banInfo.guid, guid, CLIENT_GUID_LENGTH );
 				banList.Append( banInfo );
 			}
 
@@ -2558,7 +2565,7 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 	}
 
 	if ( sessionCommand.Length() ) {
-		strncpy( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
+		idStr::Copynz( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
 		sessionCommand = "";
 	}
 

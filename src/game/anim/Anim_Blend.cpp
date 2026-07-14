@@ -959,7 +959,7 @@ void idAnim::CallFrameCommands( idEntity *ent, int from, int to ) const {
 						if( command.joint ) {
 							error += va( " on bone \'%s\'", command.joint->c_str() );
 						}
-						common->Warning( error.c_str() );
+						common->Warning( "%s", error.c_str() );
 					}
 // RAVEN END
 					break;
@@ -3302,6 +3302,7 @@ idDeclModelDef::NumJointsOnChannel
 int idDeclModelDef::NumJointsOnChannel( int channel ) const {
 	if ( ( channel < 0 ) || ( channel >= ANIM_NumAnimChannels ) ) {
 		gameLocal.Error( "idDeclModelDef::NumJointsOnChannel : channel out of range" );
+		return 0;
 	}
 	return channelJoints[ channel ].Num();
 }
@@ -3314,6 +3315,7 @@ idDeclModelDef::GetChannelJoints
 const int * idDeclModelDef::GetChannelJoints( int channel ) const {
 	if ( ( channel < 0 ) || ( channel >= ANIM_NumAnimChannels ) ) {
 		gameLocal.Error( "idDeclModelDef::GetChannelJoints : channel out of range" );
+		return NULL;
 	}
 	return channelJoints[ channel ].Ptr();
 }

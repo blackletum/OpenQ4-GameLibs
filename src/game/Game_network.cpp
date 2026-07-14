@@ -275,7 +275,7 @@ void idGameLocal::ServerClientDisconnect( int clientNum ) {
 		outMsg.Init( msgBuf, sizeof( msgBuf ) );
 		outMsg.BeginWriting();
 		outMsg.WriteByte( GAME_RELIABLE_MESSAGE_DELETE_ENT );
-		outMsg.WriteBits( ( spawnIds[ clientNum ] << GENTITYNUM_BITS ) | clientNum, 32 ); // see GetSpawnId
+		outMsg.WriteBits( PackEntitySpawnId( spawnIds[ clientNum ], clientNum ), 32 ); // see GetSpawnId
 		networkSystem->ServerSendReliableMessage( -1, outMsg );
 	}
 
@@ -742,7 +742,7 @@ void idGameLocal::NetworkEventWarning( const entityNetEvent_t *event, const char
 	va_end( argptr );
 	idStr::Append( buf, sizeof(buf), "\n" );
 
-	common->DWarning( buf );
+	common->DWarning( "%s", buf );
 }
 
 /*
@@ -2096,7 +2096,7 @@ void idGameLocal::ClientProcessReliableMessage( int clientNum, const idBitMsg &m
 			FlushBanList( );
 			while ( msg.ReadString( name, MAX_STRING_CHARS ) && msg.ReadString( guid, MAX_STRING_CHARS ) ) {
 				banInfo.name = name;
-				strncpy( banInfo.guid, guid, CLIENT_GUID_LENGTH );
+				idStr::Copynz( banInfo.guid, guid, CLIENT_GUID_LENGTH );
 				banList.Append( banInfo );
 			}
 
@@ -2366,7 +2366,7 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 	}
 
 	if ( sessionCommand.Length() ) {
-		strncpy( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
+		idStr::Copynz( ret.sessionCommand, sessionCommand, sizeof( ret.sessionCommand ) );
 		sessionCommand = "";
 	}
 

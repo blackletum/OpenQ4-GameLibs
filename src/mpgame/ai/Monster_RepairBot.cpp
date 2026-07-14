@@ -16,6 +16,9 @@ public:
     int					periodicEndTime;
 	
 						repairBotArm_t	() {
+							joint = INVALID_JOINT;
+							repairTime = 0;
+							repairing = false;
 							periodicEndTime = -1;
 						}
 	void				Save			( idSaveGame* savefile ) const;
@@ -71,6 +74,8 @@ rvMonsterRepairBot::rvMonsterRepairBot
 ================
 */
 rvMonsterRepairBot::rvMonsterRepairBot ( ) {
+	repairEndTime = 0;
+	repairEffectDist = 0.0f;
 }
 
 void rvMonsterRepairBot::InitSpawnArgsVariables( void )

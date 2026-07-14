@@ -7,17 +7,17 @@
 #ifndef __GAME_DEBUG_H__
 #define	__GAME_DEBUG_H__
 
-#define DBGHUD_NONE			(0)
-#define DBGHUD_PLAYER		(1<<0)
-#define DBGHUD_PHYSICS		(1<<1)
-#define DBGHUD_AI			(1<<2)
-#define DBGHUD_VEHICLE		(1<<3)
-#define DBGHUD_PERFORMANCE	(1<<4)
-#define DBGHUD_FX			(1<<5)
-#define DBGHUD_MAPINFO		(1<<6)
-#define DBGHUD_AI_PERFORM	(1<<7)
-#define DBGHUD_SCRATCH		(1<<31)
-#define DBGHUD_ANY			(0xFFFFFFFF)
+#define DBGHUD_NONE			(0u)
+#define DBGHUD_PLAYER		(1u<<0)
+#define DBGHUD_PHYSICS		(1u<<1)
+#define DBGHUD_AI			(1u<<2)
+#define DBGHUD_VEHICLE		(1u<<3)
+#define DBGHUD_PERFORMANCE	(1u<<4)
+#define DBGHUD_FX			(1u<<5)
+#define DBGHUD_MAPINFO		(1u<<6)
+#define DBGHUD_AI_PERFORM	(1u<<7)
+#define DBGHUD_SCRATCH		(1u<<31)
+#define DBGHUD_ANY			(0xFFFFFFFFu)
 
 #define DBGHUD_MAX			32
 
@@ -41,7 +41,7 @@ public:
 	
 	void		SetFocusEntity		( idEntity* focusEnt );
 	
-	bool		IsHudActive			( int hudMask, const idEntity* focusEnt = NULL );
+	bool		IsHudActive			( unsigned int hudMask, const idEntity* focusEnt = NULL );
 	
 	void		DrawHud				( void );
 	
@@ -82,8 +82,10 @@ private:
 	bool						inFrame;
 };
 
-ID_INLINE bool rvGameDebug::IsHudActive ( int hudMask, const idEntity* ent ) {
-	return (g_showDebugHud.GetInteger() && (hudMask & (1 << (g_showDebugHud.GetInteger()-1))) && (!ent || focusEntity == ent ) );
+ID_INLINE bool rvGameDebug::IsHudActive ( unsigned int hudMask, const idEntity* ent ) {
+	const int hudIndex = g_showDebugHud.GetInteger();
+	return hudIndex > 0 && hudIndex <= DBGHUD_MAX &&
+		( hudMask & ( 1u << ( hudIndex - 1 ) ) ) != 0 && ( !ent || focusEntity == ent );
 }
 
 ID_INLINE void rvGameDebug::SetFocusEntity ( idEntity* ent ) {

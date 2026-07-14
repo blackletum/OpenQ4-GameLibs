@@ -136,7 +136,7 @@ ID_INLINE rvClientEntityPtr<type> &rvClientEntityPtr<type>::operator=( type *cen
 	if ( cent == NULL ) {
 		spawnId = 0;
 	} else {
-		spawnId = ( gameLocal.clientSpawnIds[cent->entityNumber] << CENTITYNUM_BITS ) | cent->entityNumber;
+		spawnId = PackClientEntitySpawnId( gameLocal.clientSpawnIds[cent->entityNumber], cent->entityNumber );
 	}
 	return *this;
 }
