@@ -745,10 +745,7 @@ void idTarget_SetModel::Spawn( void ) {
 		// precache the render model
 		renderModelManager->FindModel( model );
 		// precache .cm files only
-// jmarshall: precache code is different in doom 3.
-		//collisionModelManager->PreCacheModel( gameLocal.GetMapName(), model );
-		collisionModelManager->LoadModel(gameLocal.GetMapName(), model, true);
-// jmarshall end
+		collisionModelManager->PreCacheModel( gameLocal.GetMapName(), model );
 	}
 }
 

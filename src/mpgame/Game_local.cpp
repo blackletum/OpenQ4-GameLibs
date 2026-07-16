@@ -305,7 +305,8 @@ static sortInfo_t filterByMod = {
 idGameLocal::idGameLocal
 ============
 */
-idGameLocal::idGameLocal() {
+idGameLocal::idGameLocal() :
+	mapMediaPrecacheSeen( 4096 ) {
 	Clear();
 }
 
@@ -2058,6 +2059,12 @@ idGameLocal::MapPopulate
 ===================
 */
 void idGameLocal::MapPopulate( int instance ) {
+	const int populateStartMsec = Sys_Milliseconds();
+	int phaseStartMsec = populateStartMsec;
+	int restartMsec = 0;
+	int locationsMsec = 0;
+	int spawnInitMsec = 0;
+	int eventsMsec = 0;
 
 // RAVEN BEGIN
 // jnewquist: Tag scope and callees to track allocations using "new".
@@ -2089,22 +2096,38 @@ void idGameLocal::MapPopulate( int instance ) {
 		instances[ instance ]->Restart();
 	}
 // RAVEN END
+	restartMsec = Sys_Milliseconds() - phaseStartMsec;
+	phaseStartMsec = Sys_Milliseconds();
 
 	ServerSetMinSpawnIndex();
 
 	// mark location entities in all connected areas
 	SpreadLocations();
+	locationsMsec = Sys_Milliseconds() - phaseStartMsec;
+	phaseStartMsec = Sys_Milliseconds();
 
 	// RAVEN BEGIN
 	// ddynerman: prepare the list of spawn spots
 	InitializeSpawns();
 	// RAVEN END
+	spawnInitMsec = Sys_Milliseconds() - phaseStartMsec;
+	phaseStartMsec = Sys_Milliseconds();
 
 	// execute pending events before the very first game frame
 	// this makes sure the map script main() function is called
 	// before the physics are run so entities can bind correctly
 	Printf( "------------ Processing events --------------\n" );
 	idEvent::ServiceEvents();
+	eventsMsec = Sys_Milliseconds() - phaseStartMsec;
+	if ( cvarSystem->GetCVarBool( "com_showLevelLoadTimes" ) ) {
+		Printf(
+			"Game populate phases: restart=%d locations=%d spawnInit=%d events=%d total=%d msec\n",
+			restartMsec,
+			locationsMsec,
+			spawnInitMsec,
+			eventsMsec,
+			Sys_Milliseconds() - populateStartMsec );
+	}
 }
 
 /*
@@ -2974,11 +2997,55 @@ void idGameLocal::GetShakeSounds( const idDict *dict ) {
 idGameLocal::BeginMapMediaPrecache
 ===================
 */
+enum openQ4MapMediaProfileKind_t {
+	MAP_MEDIA_MODEL,
+	MAP_MEDIA_SOUND,
+	MAP_MEDIA_GUI,
+	MAP_MEDIA_MATERIAL,
+	MAP_MEDIA_EFFECT,
+	MAP_MEDIA_SKIN,
+	MAP_MEDIA_DEF,
+	MAP_MEDIA_ANIMATION,
+	MAP_MEDIA_ICON,
+	MAP_MEDIA_PROFILE_KIND_COUNT
+};
+
+static bool openQ4ProfileMapMediaPrecache;
+static int openQ4MapMediaPrecacheCounts[ MAP_MEDIA_PROFILE_KIND_COUNT ];
+static double openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_PROFILE_KIND_COUNT ];
+static int openQ4MapMediaModelDefCount;
+static int openQ4MapMediaRenderModelCount;
+static int openQ4MapMediaCollisionModelCount;
+static double openQ4MapMediaModelDefClockTicks;
+static double openQ4MapMediaRenderModelClockTicks;
+static double openQ4MapMediaCollisionModelClockTicks;
+
+static double OpenQ4_BeginMapMediaPrecacheCall( void ) {
+	return openQ4ProfileMapMediaPrecache ? idLib::sys->GetClockTicks() : 0.0;
+}
+
+static void OpenQ4_EndMapMediaPrecacheCall( openQ4MapMediaProfileKind_t kind, double startClockTicks ) {
+	if ( !openQ4ProfileMapMediaPrecache ) {
+		return;
+	}
+	openQ4MapMediaPrecacheCounts[ kind ]++;
+	openQ4MapMediaPrecacheClockTicks[ kind ] += idLib::sys->GetClockTicks() - startClockTicks;
+}
+
 void idGameLocal::BeginMapMediaPrecache( void ) {
 	mapMediaPrecacheSeen.Clear();
 	mapMediaPrecacheRequests = 0;
 	mapMediaPrecacheSkips = 0;
 	mapMediaPrecacheActive = !cvarSystem->GetCVarBool( "com_makingBuild" );
+	openQ4ProfileMapMediaPrecache = cvarSystem->GetCVarBool( "com_showLevelLoadTimes" );
+	memset( openQ4MapMediaPrecacheCounts, 0, sizeof( openQ4MapMediaPrecacheCounts ) );
+	memset( openQ4MapMediaPrecacheClockTicks, 0, sizeof( openQ4MapMediaPrecacheClockTicks ) );
+	openQ4MapMediaModelDefCount = 0;
+	openQ4MapMediaRenderModelCount = 0;
+	openQ4MapMediaCollisionModelCount = 0;
+	openQ4MapMediaModelDefClockTicks = 0.0;
+	openQ4MapMediaRenderModelClockTicks = 0.0;
+	openQ4MapMediaCollisionModelClockTicks = 0.0;
 }
 
 /*
@@ -2992,8 +3059,27 @@ void idGameLocal::EndMapMediaPrecache( void ) {
 			mapMediaPrecacheSkips,
 			mapMediaPrecacheSeen.Num(),
 			mapMediaPrecacheRequests );
+		const double ticksPerMillisecond = idLib::sys->ClockTicksPerSecond() * 0.001;
+		Printf(
+			"Game media precache phases: model=%.1f/%d sound=%.1f/%d gui=%.1f/%d material=%.1f/%d effect=%.1f/%d skin=%.1f/%d defInclusive=%.1f/%d animation=%.1f/%d icon=%.1f/%d msec/items\n",
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_MODEL ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_MODEL ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_SOUND ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_SOUND ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_GUI ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_GUI ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_MATERIAL ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_MATERIAL ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_EFFECT ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_EFFECT ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_SKIN ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_SKIN ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_DEF ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_DEF ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_ANIMATION ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_ANIMATION ],
+			openQ4MapMediaPrecacheClockTicks[ MAP_MEDIA_ICON ] / ticksPerMillisecond, openQ4MapMediaPrecacheCounts[ MAP_MEDIA_ICON ] );
+		Printf(
+			"Game model precache phases: modelDef=%.1f/%d renderModel=%.1f/%d collisionModel=%.1f/%d msec/items\n",
+			openQ4MapMediaModelDefClockTicks / ticksPerMillisecond, openQ4MapMediaModelDefCount,
+			openQ4MapMediaRenderModelClockTicks / ticksPerMillisecond, openQ4MapMediaRenderModelCount,
+			openQ4MapMediaCollisionModelClockTicks / ticksPerMillisecond, openQ4MapMediaCollisionModelCount );
 	}
 	mapMediaPrecacheActive = false;
+	openQ4ProfileMapMediaPrecache = false;
+	mapMediaPrecacheSeen.Clear();
 }
 
 /*
@@ -3008,19 +3094,42 @@ bool idGameLocal::RememberMapMediaPrecache( const char *kind, const char *value 
 
 	mapMediaPrecacheRequests++;
 
-	idStr key = kind != NULL ? kind : "";
-	key += ":";
-	key += value;
-	key.BackSlashesToSlashes();
-	key.ToLower();
+	const char *kindText = kind != NULL ? kind : "";
+	const int kindLength = (int)strlen( kindText );
+	const int valueLength = (int)strlen( value );
+	const int keyLength = kindLength + 1 + valueLength;
 
-	if ( mapMediaPrecacheSeen.Get( key.c_str() ) ) {
+	char keyBuffer[ MAX_STRING_CHARS ];
+	idStr longKey;
+	const char *key;
+	if ( keyLength < (int)sizeof( keyBuffer ) ) {
+		int keyIndex = 0;
+		for ( int i = 0; i < kindLength; i++ ) {
+			keyBuffer[ keyIndex++ ] = idStr::ToLower( (byte)kindText[ i ] );
+		}
+		keyBuffer[ keyIndex++ ] = ':';
+		for ( int i = 0; i < valueLength; i++ ) {
+			const char c = value[ i ] == '\\' ? '/' : value[ i ];
+			keyBuffer[ keyIndex++ ] = idStr::ToLower( (byte)c );
+		}
+		keyBuffer[ keyIndex ] = '\0';
+		key = keyBuffer;
+	} else {
+		longKey = kindText;
+		longKey += ":";
+		longKey += value;
+		longKey.BackSlashesToSlashes();
+		longKey.ToLower();
+		key = longKey.c_str();
+	}
+
+	if ( mapMediaPrecacheSeen.Get( key ) ) {
 		mapMediaPrecacheSkips++;
 		return true;
 	}
 
 	int remembered = 1;
-	mapMediaPrecacheSeen.Set( key.c_str(), remembered );
+	mapMediaPrecacheSeen.Set( key, remembered );
 	return false;
 }
 
@@ -3074,14 +3183,32 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "model", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->MediaPrint( "Precaching model %s\n", kv->GetValue().c_str() );
 			// precache model/animations
-			if ( declManager->FindType( DECL_MODELDEF, kv->GetValue(), false ) == NULL ) {
-				// precache the render model
-				renderModelManager->FindModel( kv->GetValue() );
-				// precache .cm files only
-				collisionModelManager->PreCacheModel( GetMapName(), kv->GetValue() );
+			const double modelDefProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
+			const idDecl *modelDef = declManager->FindType( DECL_MODELDEF, kv->GetValue(), false );
+			if ( openQ4ProfileMapMediaPrecache ) {
+				openQ4MapMediaModelDefCount++;
+				openQ4MapMediaModelDefClockTicks += idLib::sys->GetClockTicks() - modelDefProfileStart;
 			}
+			if ( modelDef == NULL ) {
+				// precache the render model
+				const double renderModelProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
+				renderModelManager->FindModel( kv->GetValue() );
+				if ( openQ4ProfileMapMediaPrecache ) {
+					openQ4MapMediaRenderModelCount++;
+					openQ4MapMediaRenderModelClockTicks += idLib::sys->GetClockTicks() - renderModelProfileStart;
+				}
+				// precache .cm files only
+				const double collisionModelProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
+				collisionModelManager->PreCacheModel( GetMapName(), kv->GetValue() );
+				if ( openQ4ProfileMapMediaPrecache ) {
+					openQ4MapMediaCollisionModelCount++;
+					openQ4MapMediaCollisionModelClockTicks += idLib::sys->GetClockTicks() - collisionModelProfileStart;
+				}
+			}
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_MODEL, mediaProfileStart );
 		} else if ( MATCH( "s_shader" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3090,7 +3217,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "sound", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_SOUND, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_SOUND, mediaProfileStart );
 		} else if ( MATCH( "snd_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3099,7 +3228,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "sound", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_SOUND, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_SOUND, mediaProfileStart );
 		} else if ( MATCH( "gui_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3113,8 +3244,10 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 				if ( RememberMapMediaPrecache( "gui", kv->GetValue() ) ) {
 					continue;
 				}
+				const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 				declManager->MediaPrint( "Precaching gui %s\n", kv->GetValue().c_str() );
 				uiManager->FindGui( kv->GetValue().c_str(), true );
+				OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_GUI, mediaProfileStart );
 			}
 		} else if ( MATCH( "texture" ) ) {
 			
@@ -3124,7 +3257,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_MATERIAL, mediaProfileStart );
 		} else if ( MATCH( "mtr_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3133,7 +3268,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_MATERIAL, mediaProfileStart );
 		} else if ( MATCH( "screenShot" ) ) {
 		
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3142,7 +3279,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_MATERIAL, mediaProfileStart );
 		} else if ( MATCH( "inv_icon" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3151,7 +3290,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "material", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_MATERIAL, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_MATERIAL, mediaProfileStart );
 		} else if ( MATCH( "teleport" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3162,7 +3303,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "effect", p ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->FindType( DECL_EFFECT, p );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_EFFECT, mediaProfileStart );
 		} else if ( MATCH( "fx_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3171,8 +3314,10 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "effect", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->MediaPrint( "Precaching fx %s\n", kv->GetValue().c_str() );
 			declManager->FindEffect( kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_EFFECT, mediaProfileStart );
 		} else if ( MATCH( "skin" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3181,8 +3326,10 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "skin", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->MediaPrint( "Precaching skin %s\n", kv->GetValue().c_str() );
 			declManager->FindType( DECL_SKIN, kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_SKIN, mediaProfileStart );
 		} else if ( MATCH( "def_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3191,7 +3338,9 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "def", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			FindEntityDef( kv->GetValue().c_str(), false );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_DEF, mediaProfileStart );
 		} else if ( MATCH( "playback_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3200,8 +3349,10 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "playback", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->MediaPrint( "Precaching playback %s\n", kv->GetValue().c_str() );
 			declManager->FindPlayback( kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_ANIMATION, mediaProfileStart );
 		} else if ( MATCH( "lipsync_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3210,9 +3361,11 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "lipsync", kv->GetValue() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			declManager->MediaPrint( "Precaching lipsync %s\n", kv->GetValue().c_str() );
 			declManager->FindLipSync( kv->GetValue() );
 			declManager->FindSound ( kv->GetValue() );
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_ANIMATION, mediaProfileStart );
 		} else if ( MATCH( "icon " ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -3224,6 +3377,7 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			if ( RememberMapMediaPrecache( "icon", iconPrecacheKey.c_str() ) ) {
 				continue;
 			}
+			const double mediaProfileStart = OpenQ4_BeginMapMediaPrecacheCall();
 			idLexer  src ( LEXFL_ALLOWPATHNAMES );
 			idToken  token;
 			idToken	 token2;
@@ -3251,6 +3405,7 @@ void idGameLocal::CacheDictionaryMedia( const idDict *dict ) {
 			} else { 
 				uiManager->RegisterIcon ( kv->GetKey ( ).c_str() + 5, token );
 			}
+			OpenQ4_EndMapMediaPrecacheCall( MAP_MEDIA_ICON, mediaProfileStart );
 		} else if ( MATCH( "spawn_" ) ) {
 			
 			TIME_THIS_SCOPE( __FUNCLINE__);
@@ -5350,8 +5505,14 @@ bool idGameLocal::SpawnEntityDef( const idDict &args, idEntity **ent, bool setDe
 	}
 	spawnArgs.GetString( "classname", NULL, &classname );
 
-	const idDeclEntityDef *def = FindEntityDef( classname, false );
-	if ( !def ) {
+	// Callers that disable defaults pass a dictionary that has already been
+	// resolved from its entityDef. Avoid repeating the declaration lookup and
+	// default merge on those prepared spawn paths.
+	const idDeclEntityDef *def = NULL;
+	if ( setDefaults || g_keepEntityStats.GetBool() ) {
+		def = FindEntityDef( classname, false );
+	}
+	if ( setDefaults && !def ) {
 // RAVEN BEGIN
 // jscott: a NULL classname would crash Warning()
 		if( classname ) {
@@ -5361,7 +5522,9 @@ bool idGameLocal::SpawnEntityDef( const idDict &args, idEntity **ent, bool setDe
 		return false;
 	}
 
-	spawnArgs.SetDefaults( &def->dict );
+	if ( setDefaults ) {
+		spawnArgs.SetDefaults( &def->dict );
+	}
 
 // RAVEN BEGIN
 // rjohnson: entity usage stats
@@ -5389,7 +5552,7 @@ bool idGameLocal::SpawnEntityDef( const idDict &args, idEntity **ent, bool setDe
 				}
 			}
 		}
-		else if ( def->dict.GetBool( "report_stats" ) ) {
+		else if ( def != NULL && def->dict.GetBool( "report_stats" ) ) {
 			idDict	tempArgs = spawnArgs;
 			tempArgs.Set( "mapFileName", mapFileNameStripped );
 			entityUsageList.Insert( tempArgs );
@@ -5617,6 +5780,17 @@ void idGameLocal::SpawnMapEntities( int instance, unsigned short* entityNumIn, u
 	int			numEntities;
 	idDict		args;
 	idDict		items;
+	const bool profileMapSpawn = cvarSystem->GetCVarBool( "com_showLevelLoadTimes" );
+	idTimer mapSpawnTimer;
+	idTimer mapCopyTimer;
+	idTimer mapDefLookupTimer;
+	idTimer mapDefaultsTimer;
+	idTimer mapInhibitTimer;
+	idTimer mapMediaTimer;
+	idTimer mapEntitySpawnTimer;
+	if ( profileMapSpawn ) {
+		mapSpawnTimer.Start();
+	}
 
 	Printf( "Spawning entities\n" );
 	
@@ -5686,21 +5860,42 @@ void idGameLocal::SpawnMapEntities( int instance, unsigned short* entityNumIn, u
 
 	for ( i = 1 ; i < numEntities ; i++ ) {
 
+		if ( profileMapSpawn ) {
+			mapCopyTimer.Start();
+		}
 		mapEnt = mapFile->GetEntity( i );
 		args = mapEnt->epairs;
+		if ( profileMapSpawn ) {
+			mapCopyTimer.Stop();
+			mapDefLookupTimer.Start();
+		}
 
 // RAVEN BEGIN
 // ddynerman: merge the dicts ahead of SpawnEntityDef() so we can inhibit using merged info
 		const idDeclEntityDef* entityDef = FindEntityDef( args.GetString( "classname" ), false );
+		if ( profileMapSpawn ) {
+			mapDefLookupTimer.Stop();
+		}
 		
 		if( entityDef == NULL ) {
 			gameLocal.Error( "idGameLocal::SpawnMapEntities() - Unknown entity classname '%s'\n", args.GetString( "classname" ) );
 			return;
 		}
+		if ( profileMapSpawn ) {
+			mapDefaultsTimer.Start();
+		}
 		args.SetDefaults( &(entityDef->dict) );
 // RAVEN END
+		if ( profileMapSpawn ) {
+			mapDefaultsTimer.Stop();
+			mapInhibitTimer.Start();
+		}
+		const bool inhibitSpawn = InhibitEntitySpawn( args );
+		if ( profileMapSpawn ) {
+			mapInhibitTimer.Stop();
+		}
 
-		if ( !InhibitEntitySpawn( args ) ) {
+		if ( !inhibitSpawn ) {
 
 			if( args.GetBool( "inv_item" ) ) {
 				if( !items.GetBool( args.GetString( "inv_icon" ) ) ) {
@@ -5711,7 +5906,16 @@ void idGameLocal::SpawnMapEntities( int instance, unsigned short* entityNumIn, u
 			}
 
 			// precache any media specified in the map entity
-			CacheDictionaryMedia( &args );
+			// EntityDef parsing has already cached inherited/default media.
+			// Only scan the map-authored overrides here instead of walking the
+			// complete merged dictionary again for every entity instance.
+			if ( profileMapSpawn ) {
+				mapMediaTimer.Start();
+			}
+			CacheDictionaryMedia( &mapEnt->epairs );
+			if ( profileMapSpawn ) {
+				mapMediaTimer.Stop();
+			}
 // RAVEN BEGIN
 			if ( instance != 0 ) {
 // ddynerman: allow this function to be called multiple-times to respawn map entities in other instances
@@ -5745,7 +5949,13 @@ void idGameLocal::SpawnMapEntities( int instance, unsigned short* entityNumIn, u
 			}
 
 			idEntity* ent = NULL;
-			SpawnEntityDef( args, &ent );
+			if ( profileMapSpawn ) {
+				mapEntitySpawnTimer.Start();
+			}
+			SpawnEntityDef( args, &ent, false );
+			if ( profileMapSpawn ) {
+				mapEntitySpawnTimer.Stop();
+			}
 			//common->Printf( "pop: spawn map ent %d at %d ( %s )\n", i, ent->entityNumber, args.GetString( "name" ) );
 	
 			if ( ent && entityNumOut ) {
@@ -5772,6 +5982,25 @@ void idGameLocal::SpawnMapEntities( int instance, unsigned short* entityNumIn, u
 	}
 
 	Printf( "...%i entities spawned, %i inhibited\n\n", num, inhibit );
+	if ( profileMapSpawn ) {
+		mapSpawnTimer.Stop();
+		Printf(
+			"Map entity spawn phases: copy=%.1f defLookup=%.1f defaults=%.1f inhibit=%.1f media=%.1f entitySpawn=%.1f other=%.1f total=%.1f msec\n",
+			mapCopyTimer.Milliseconds(),
+			mapDefLookupTimer.Milliseconds(),
+			mapDefaultsTimer.Milliseconds(),
+			mapInhibitTimer.Milliseconds(),
+			mapMediaTimer.Milliseconds(),
+			mapEntitySpawnTimer.Milliseconds(),
+			Max( 0.0, mapSpawnTimer.Milliseconds() -
+				mapCopyTimer.Milliseconds() -
+				mapDefLookupTimer.Milliseconds() -
+				mapDefaultsTimer.Milliseconds() -
+				mapInhibitTimer.Milliseconds() -
+				mapMediaTimer.Milliseconds() -
+				mapEntitySpawnTimer.Milliseconds() ),
+			mapSpawnTimer.Milliseconds() );
+	}
 }
 
 /*

@@ -270,6 +270,9 @@ private:
 	idVec3					totaldelta;
 	mutable int				ref_count;
 
+	bool					LoadGeneratedAnim( const char *filename );
+	void					WriteGeneratedAnim( const char *filename ) const;
+
 public:
 							idMD5Anim();
 							~idMD5Anim();
