@@ -1571,7 +1571,19 @@ rvWeapon::ReadFromSnapshot
 ================
 */
 void rvWeapon::ReadFromSnapshot( const idBitMsgDelta &msg ) {
-	ammoClip = msg.ReadBits( ASYNC_PLAYER_INV_CLIP_BITS );
+	const int decodedAmmo = DecodeSnapshotAmmo( msg );
+	if ( msg.IsReadOverflowed() ) {
+		return;
+	}
+	ApplySnapshotAmmo( decodedAmmo );
+}
+
+int rvWeapon::DecodeSnapshotAmmo( const idBitMsgDelta &msg ) {
+	return msg.ReadBits( ASYNC_PLAYER_INV_CLIP_BITS );
+}
+
+void rvWeapon::ApplySnapshotAmmo( int decodedAmmo ) {
+	ammoClip = decodedAmmo;
 }
 
 /*
@@ -1580,7 +1592,7 @@ rvWeapon::SkipFromSnapshot
 ================
 */
 void rvWeapon::SkipFromSnapshot ( const idBitMsgDelta &msg ) {
-	msg.ReadBits( ASYNC_PLAYER_INV_CLIP_BITS );
+	DecodeSnapshotAmmo( msg );
 }
 
 /*

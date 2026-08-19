@@ -6275,11 +6275,22 @@ idEntity::ReadBindFromSnapshot
 ================
 */
 void idEntity::ReadBindFromSnapshot( const idBitMsgDelta &msg ) {
-	int bindInfo, bindEntityNum, bindPos;
+	const int bindInfo = DecodeBindSnapshotInfo( msg );
+	if ( msg.IsReadOverflowed() ) {
+		return;
+	}
+	ApplyBindSnapshotInfo( bindInfo );
+}
+
+int idEntity::DecodeBindSnapshotInfo( const idBitMsgDelta &msg ) const {
+	return msg.ReadBits( GENTITYNUM_BITS + 3 + 9 );
+}
+
+void idEntity::ApplyBindSnapshotInfo( int bindInfo ) {
+	int bindEntityNum, bindPos;
 	bool bindOrientated;
 	idEntity *master;
 
-	bindInfo = msg.ReadBits( GENTITYNUM_BITS + 3 + 9 );
 	bindEntityNum = bindInfo & ( ( 1 << GENTITYNUM_BITS ) - 1 );
 
 	if ( bindEntityNum != ENTITYNUM_NONE ) {

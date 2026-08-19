@@ -510,6 +510,8 @@ public:
 
 	void					WriteBindToSnapshot( idBitMsgDelta &msg ) const;
 	void					ReadBindFromSnapshot( const idBitMsgDelta &msg );
+	int					DecodeBindSnapshotInfo( const idBitMsgDelta &msg ) const;
+	void					ApplyBindSnapshotInfo( int bindInfo );
 	void					WriteColorToSnapshot( idBitMsgDelta &msg ) const;
 	void					ReadColorFromSnapshot( const idBitMsgDelta &msg );
 	void					WriteGUIToSnapshot( idBitMsgDelta &msg ) const;

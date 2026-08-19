@@ -1545,18 +1545,36 @@ idProjectile::ReadFromSnapshot
 */
 void idProjectile::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 	projectileState_t newState;
+	particlePState_t newPhysicsState;
+	int newLaunchTime = launchTime;
+	idVec3 newLaunchOrig = launchOrig;
+	idVec3 newLaunchDir = launchDir;
 
 	if ( syncPhysics ) {
-		physicsObj.ReadFromSnapshot( msg );
+		if ( !physicsObj.DecodeSnapshotState( msg, newPhysicsState ) ) {
+			return;
+		}
 	}
 
 	newState = (projectileState_t) msg.ReadBits( 3 );
 	if ( newState >= LAUNCHED ) {
-		launchTime = msg.ReadLong();
-		launchOrig[ 0 ] = msg.ReadFloat();
-		launchOrig[ 1 ] = msg.ReadFloat();
-		launchOrig[ 2 ] = msg.ReadFloat();
-		launchDir = msg.ReadDir( 24 );
+		newLaunchTime = msg.ReadLong();
+		newLaunchOrig[ 0 ] = msg.ReadFloat();
+		newLaunchOrig[ 1 ] = msg.ReadFloat();
+		newLaunchOrig[ 2 ] = msg.ReadFloat();
+		newLaunchDir = msg.ReadDir( 24 );
+	}
+	if ( msg.IsReadOverflowed() ) {
+		return;
+	}
+
+	if ( syncPhysics ) {
+		physicsObj.ApplySnapshotState( newPhysicsState );
+	}
+	if ( newState >= LAUNCHED ) {
+		launchTime = newLaunchTime;
+		launchOrig = newLaunchOrig;
+		launchDir = newLaunchDir;
 	}
 	// we always create and launch at the same time
 	// state on a client can be SPAWNED, LAUNCHED, EXPLODED

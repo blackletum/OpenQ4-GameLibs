@@ -1644,23 +1644,40 @@ idProjectile::ReadFromSnapshot
 */
 void idProjectile::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 	projectileState_t newState;
+	particlePState_t newPhysicsState;
 	idEntity *ownerEnt = NULL;
-	int newLaunchTime;
+	int newLaunchTime = launchTime;
+	idVec3 newLaunchOrig = launchOrig;
+	idVec3 newLaunchDir = launchDir;
+	int ownerNum = MAX_CLIENTS;
 
 	if ( syncPhysics ) {
-		physicsObj.ReadFromSnapshot( msg );
+		if ( !physicsObj.DecodeSnapshotState( msg, newPhysicsState ) ) {
+			return;
+		}
 	}
 
 	newState = (projectileState_t) msg.ReadBits( 3 );
 	if ( newState >= LAUNCHED ) {
 		newLaunchTime = msg.ReadLong();
-		launchOrig[ 0 ] = msg.ReadFloat();
-		launchOrig[ 1 ] = msg.ReadFloat();
-		launchOrig[ 2 ] = msg.ReadFloat();
-		launchDir = msg.ReadDir( 24 );
+		newLaunchOrig[ 0 ] = msg.ReadFloat();
+		newLaunchOrig[ 1 ] = msg.ReadFloat();
+		newLaunchOrig[ 2 ] = msg.ReadFloat();
+		newLaunchDir = msg.ReadDir( 24 );
 
-		int ownerNum = msg.ReadBits( idMath::BitsForInteger(MAX_CLIENTS) );
-		if ( ownerNum < MAX_CLIENTS && gameLocal.entities[ ownerNum ] && gameLocal.entities[ ownerNum ]->IsType( idPlayer::GetClassType() ) ) {
+		ownerNum = msg.ReadBits( idMath::BitsForInteger(MAX_CLIENTS) );
+	}
+	if ( msg.IsReadOverflowed() ) {
+		return;
+	}
+
+	if ( syncPhysics ) {
+		physicsObj.ApplySnapshotState( newPhysicsState );
+	}
+	if ( newState >= LAUNCHED ) {
+		launchOrig = newLaunchOrig;
+		launchDir = newLaunchDir;
+		if ( ownerNum >= 0 && ownerNum < MAX_CLIENTS && gameLocal.entities[ ownerNum ] && gameLocal.entities[ ownerNum ]->IsType( idPlayer::GetClassType() ) ) {
 			ownerEnt = gameLocal.entities[ ownerNum ];
 		}
 

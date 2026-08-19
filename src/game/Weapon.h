@@ -237,8 +237,10 @@ public:
 	const idAngles&		GetViewModelAngles			( void ) const;
 	const idVec3&		GetViewModelOffset			( void ) const;
 
- 	static void			CacheWeapon					( const char *weaponName );
+	static void			CacheWeapon					( const char *weaponName );
 	static void			SkipFromSnapshot			( const idBitMsgDelta &msg );
+	static int			DecodeSnapshotAmmo			( const idBitMsgDelta &msg );
+	void				ApplySnapshotAmmo			( int decodedAmmo );
 
 	void				EnterCinematic				( void );
 	void				ExitCinematic				( void );

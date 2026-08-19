@@ -14237,35 +14237,88 @@ idPlayer::ReadFromSnapshot
 void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 	assert( !IsFakeClient() );
 
- 	int		i, oldHealth, newIdealWeapon, weaponSpawnId, weaponWorldSpawnId;
+	int		i, oldHealth, newIdealWeapon, newWeaponSpawnId, newWeaponWorldSpawnId;
 	bool	stateHitch;
 	int		lastKillerEntity;
+	playerPState_t decodedPhysics;
+	idAngles decodedDeltaViewAngles;
+	int decodedHealth;
+	int decodedArmor;
+	int decodedLastDamageDef;
+	idVec3 decodedLastDamageDir;
+	int decodedLastDamageLocation;
+	int decodedWeapons;
+	int decodedSpectator;
+	bool decodedWeaponGone;
+	bool decodedIsLagged;
+	bool decodedIsChatting;
+	int decodedConnectTime;
+	bool hasWeaponState;
+	int decodedWeaponAmmo = 0;
+	bool decodedInBuyZone;
+	int decodedCash;
 
- 	if ( snapshotSequence - lastSnapshotSequence > 1 ) {
+	if ( static_cast<unsigned int>( snapshotSequence ) - static_cast<unsigned int>( lastSnapshotSequence ) > 1u ) {
  		stateHitch = true;
  	} else {
  		stateHitch = false;
  	}
- 	lastSnapshotSequence = snapshotSequence;
-
 	oldHealth = health;
 
-	physicsObj.ReadFromSnapshot( msg );
-	ReadBindFromSnapshot( msg );
-	deltaViewAngles[0] = msg.ReadDeltaFloat( 0.0f );
-	deltaViewAngles[1] = msg.ReadDeltaFloat( 0.0f );
-	deltaViewAngles[2] = msg.ReadDeltaFloat( 0.0f );
-	health = msg.ReadShort();
-	inventory.armor = msg.ReadByte();
- 	lastDamageDef = msg.ReadBits( gameLocal.entityDefBits );
-	lastDamageDir = msg.ReadDir( 9 );
-	lastDamageLocation = msg.ReadShort();
+	if ( !physicsObj.DecodeSnapshotState( msg, decodedPhysics ) ) {
+		return;
+	}
+	const int decodedBindInfo = DecodeBindSnapshotInfo( msg );
+	decodedDeltaViewAngles[0] = msg.ReadDeltaFloat( 0.0f );
+	decodedDeltaViewAngles[1] = msg.ReadDeltaFloat( 0.0f );
+	decodedDeltaViewAngles[2] = msg.ReadDeltaFloat( 0.0f );
+	decodedHealth = msg.ReadShort();
+	decodedArmor = msg.ReadByte();
+	decodedLastDamageDef = msg.ReadBits( gameLocal.entityDefBits );
+	decodedLastDamageDir = msg.ReadDir( 9 );
+	decodedLastDamageLocation = msg.ReadShort();
 	newIdealWeapon = msg.ReadBits( -idMath::BitsForInteger( MAX_WEAPONS ) );
-	inventory.weapons = msg.ReadBits( MAX_WEAPONS );
- 	weaponSpawnId = msg.ReadBits( 32 );
- 	weaponWorldSpawnId = msg.ReadBits( 32 );
-	int latchedSpectator = spectator;
-	spectator = msg.ReadBits( idMath::BitsForInteger( MAX_CLIENTS ) );
+	if ( msg.IsReadOverflowed() || newIdealWeapon < -1 || newIdealWeapon >= MAX_WEAPONS ) {
+		gameLocal.Warning( "ReadFromSnapshot: invalid ideal weapon %d", newIdealWeapon );
+		msg.MarkReadOverflowed();
+		return;
+	}
+	decodedWeapons = msg.ReadBits( MAX_WEAPONS );
+	newWeaponSpawnId = msg.ReadBits( 32 );
+	newWeaponWorldSpawnId = msg.ReadBits( 32 );
+	decodedSpectator = msg.ReadBits( idMath::BitsForInteger( MAX_CLIENTS ) );
+	if ( msg.IsReadOverflowed() || decodedSpectator < 0 || decodedSpectator >= MAX_CLIENTS ) {
+		gameLocal.Warning( "ReadFromSnapshot: invalid spectator %d", decodedSpectator );
+		msg.MarkReadOverflowed();
+		return;
+	}
+	decodedWeaponGone = msg.ReadBits( 1 ) != 0;
+	decodedIsLagged = msg.ReadBits( 1 ) != 0;
+	decodedIsChatting = msg.ReadBits( 1 ) != 0;
+	decodedConnectTime = msg.ReadLong();
+	lastKillerEntity = msg.ReadByte();
+	hasWeaponState = msg.ReadBits( 1 ) != 0;
+	if ( hasWeaponState ) {
+		decodedWeaponAmmo = rvWeapon::DecodeSnapshotAmmo( msg );
+	}
+	decodedInBuyZone = msg.ReadBits( 1 ) != 0;
+	decodedCash = msg.ReadLong();
+	if ( msg.IsReadOverflowed() ) {
+		return;
+	}
+
+	lastSnapshotSequence = snapshotSequence;
+	physicsObj.ApplySnapshotState( decodedPhysics );
+	ApplyBindSnapshotInfo( decodedBindInfo );
+	deltaViewAngles = decodedDeltaViewAngles;
+	health = decodedHealth;
+	inventory.armor = decodedArmor;
+	lastDamageDef = decodedLastDamageDef;
+	lastDamageDir = decodedLastDamageDir;
+	lastDamageLocation = decodedLastDamageLocation;
+	inventory.weapons = decodedWeapons;
+	const int latchedSpectator = spectator;
+	spectator = decodedSpectator;
 	if ( spectating && latchedSpectator != spectator ) {
 		// don't do any smoothing with this snapshot
 		predictedFrame = gameLocal.framenum;
@@ -14286,7 +14339,7 @@ void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 				gameLocal.mpGame.tourneyGUI.UpdateScores();
 			}
 
-			if ( gameLocal.entities[ spectator ] ) {
+			if ( gameLocal.entities[ spectator ] && gameLocal.entities[ spectator ]->IsType( idPlayer::GetClassType() ) ) {
 				idPlayer *p = static_cast< idPlayer * >( gameLocal.entities[ spectator ] );
 				p->UpdateHudWeapon( p->currentWeapon );
 				if ( p->weapon ) {
@@ -14295,12 +14348,13 @@ void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 			}
 		}
 	}
- 	weaponGone = msg.ReadBits( 1 ) != 0;
- 	isLagged = msg.ReadBits( 1 ) != 0;
- 	isChatting = msg.ReadBits( 1 ) != 0;
-	connectTime = msg.ReadLong();
-	lastKillerEntity = msg.ReadByte();
-	if( lastKillerEntity >= 0 && lastKillerEntity < MAX_CLIENTS)	{
+	weaponGone = decodedWeaponGone;
+	isLagged = decodedIsLagged;
+	isChatting = decodedIsChatting;
+	connectTime = decodedConnectTime;
+	if( lastKillerEntity >= 0 && lastKillerEntity < MAX_CLIENTS &&
+		gameLocal.entities[ lastKillerEntity ] != NULL &&
+		gameLocal.entities[ lastKillerEntity ]->IsType( idPlayer::GetClassType() ) )	{
 		lastKiller = static_cast<idPlayer *>(gameLocal.entities[ lastKillerEntity ]);
 	} else {
 		lastKiller = NULL;
@@ -14327,10 +14381,10 @@ void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 	}
 
 	// Attach the world and view entities  
-	if ( weaponWorldModel.GetSpawnId() != weaponWorldSpawnId || weaponViewModel.GetSpawnId() != weaponSpawnId ) {
+	if ( weaponWorldModel.GetSpawnId() != newWeaponWorldSpawnId || weaponViewModel.GetSpawnId() != newWeaponSpawnId ) {
 		SetWeapon( -1 );
 
-		if ( weaponWorldModel.SetSpawnId( weaponWorldSpawnId ) && weaponViewModel.SetSpawnId( weaponSpawnId ) ) {
+		if ( weaponWorldModel.SetSpawnId( newWeaponWorldSpawnId ) && weaponViewModel.SetSpawnId( newWeaponSpawnId ) ) {
 			weaponCatchup = true;
 		}
 	}
@@ -14357,17 +14411,14 @@ void idPlayer::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 
 	// If we have a weapon then update it from the snapshot, otherwise
 	// we just skip whatever it would have read if it were there
-	if ( msg.ReadBits( 1 ) ) {
+	if ( hasWeaponState ) {
 		if ( weapon ) {
-			weapon->ReadFromSnapshot( msg );
-		} else {
-			rvWeapon::SkipFromSnapshot( msg );
+			weapon->ApplySnapshotAmmo( decodedWeaponAmmo );
 		}
 	}
-	inBuyZone = msg.ReadBits( 1 ) != 0;
-	int cash = msg.ReadLong();
-	if ( cash != (int)buyMenuCash ) {
-		buyMenuCash = (float)cash;
+	inBuyZone = decodedInBuyZone;
+	if ( decodedCash != (int)buyMenuCash ) {
+		buyMenuCash = (float)decodedCash;
 		gameLocal.mpGame.RedrawLocalBuyMenu();
 	}
  	// no msg reading below this
@@ -14960,6 +15011,9 @@ idPlayer::GetWeaponDef
 ==============
 */
 const idDeclEntityDef* idPlayer::GetWeaponDef ( int weaponIndex ) {
+	if ( weaponIndex < 0 || weaponIndex >= MAX_WEAPONS ) {
+		return NULL;
+	}
 	if ( cachedWeaponDefs[weaponIndex] ) {
 		return cachedWeaponDefs[weaponIndex];
 	}
