@@ -16039,6 +16039,7 @@ bool idMultiplayerGame::Draw( int clientNum ) {
 
 	gameLocal.PreparePlayerSceneForRender( viewPlayer );
 	if ( !viewPlayer->GetRenderView() ) {
+		gameLocal.EndPresentationSceneForRender();
 		return false;
 	}
 
@@ -16049,6 +16050,7 @@ bool idMultiplayerGame::Draw( int clientNum ) {
 		hud = player->hud;
 	}
 	viewPlayer->playerView.RenderPlayerView( hud );
+	gameLocal.EndPresentationSceneForRender();
 
 	// allow force scoreboard to overwrite a fullscreen menu
 	if ( currentMenu ) { 

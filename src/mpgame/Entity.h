@@ -241,7 +241,7 @@ public:
 	virtual bool			AllowsPresentationInterpolation( void ) const;
 	virtual void			UpdatePresentationPose( void );
 	virtual void			RestoreAuthoritativePresentationPose( void );
-	void					UpdatePresentationClientEntities( void );
+	void					UpdatePresentationClientEntities( int presentationTime );
 	// instance visuals
 	virtual void			InstanceJoin( void );
 	virtual void			InstanceLeave( void );
@@ -789,6 +789,7 @@ public:
 	virtual void			SetModel( const char *modelname );
 
 	bool					GetJointWorldTransform( jointHandle_t jointHandle, int currentTime, idVec3 &offset, idMat3 &axis );
+	bool					GetPresentationJointWorldTransform( jointHandle_t jointHandle, idVec3 &offset, idMat3 &axis );
 	bool					GetJointTransformForAnim( jointHandle_t jointHandle, int animNum, int currentTime, idVec3 &offset, idMat3 &axis ) const;
 
 	virtual int				GetDefaultSurfaceType( void ) const;

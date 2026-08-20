@@ -1601,6 +1601,12 @@ void idProjectile::ClientPredictionThink( void ) {
 	if ( !renderEntity.hModel && clientEntities.IsListEmpty() ) {
 		return;
 	}
+	// Prediction may replay the same authoritative snapshot while reconciling a
+	// remote client.  Do not advance physics or effect ownership more than once
+	// for that snapshot; repeated presentation frames only resubmit transforms.
+	if ( !gameLocal.isNewFrame ) {
+		return;
+	}
 	if ( !syncPhysics && state == LAUNCHED ) {
 		idMat3 axis = launchDir.ToMat3();
 		idVec3 origin( launchOrig );
@@ -1745,18 +1751,52 @@ void idProjectile::ReadFromSnapshot( const idBitMsgDelta &msg ) {
 		if ( newState != state ) {
 			switch ( newState ) {
 			case LAUNCHED:
-				Create( NULL, launchOrig, launchDir );
+				Create( ownerEnt, launchOrig, launchDir );
 				Launch( launchOrig, launchDir, vec3_origin );
 				Show();
 				break;
 			case FIZZLED:
-			case EXPLODED:
-				if ( state != EXPLODED ) {
+				// A short-lived projectile can reach its terminal state before
+				// this client receives a LAUNCHED snapshot.  Recreate its visual
+				// pose so the terminal effect is not silently lost.
+				if ( state < LAUNCHED ) {
+					const idVec3 snapshotOrigin = syncPhysics ? physicsObj.GetOrigin() : launchOrig;
+					const idVec3 snapshotDir = syncPhysics ? physicsObj.GetAxis()[ 0 ] : launchDir;
+					Create( ownerEnt, snapshotOrigin, snapshotDir );
+					if ( !syncPhysics ) {
+						launchSpeed = GetVelocity( &spawnArgs ).LengthFast();
+						physicsObj.SetAxis( launchDir.ToMat3() );
+						physicsObj.SetOrigin( launchOrig + ( ( gameLocal.time - launchTime ) / 1000.0f ) * launchSpeed * launchDir );
+						physicsObj.SetLinearVelocity( launchSpeed * launchDir );
+					}
+					UpdateVisuals();
+				}
+				if ( state != FIZZLED && state != EXPLODED ) {
 					StopSound( SND_CHANNEL_BODY, false );
+					StartSound( "snd_fizzle", SND_CHANNEL_BODY, 0, false, NULL );
+					gameLocal.PlayEffect( spawnArgs, "fx_fuse", GetPhysics()->GetOrigin(), GetPhysics()->GetAxis() );
 					StopAllEffects();
 					Hide();
 					FreeLightDef();
-					state = EXPLODED;
+					state = FIZZLED;
+				}
+				break;
+			case IMPACTED:
+			case EXPLODED:
+				if ( state < LAUNCHED ) {
+					const idVec3 snapshotOrigin = syncPhysics ? physicsObj.GetOrigin() : launchOrig;
+					const idVec3 snapshotDir = syncPhysics ? physicsObj.GetAxis()[ 0 ] : launchDir;
+					Create( ownerEnt, snapshotOrigin, snapshotDir );
+					if ( !syncPhysics ) {
+						launchSpeed = GetVelocity( &spawnArgs ).LengthFast();
+						physicsObj.SetAxis( launchDir.ToMat3() );
+						physicsObj.SetOrigin( launchOrig + ( ( gameLocal.time - launchTime ) / 1000.0f ) * launchSpeed * launchDir );
+						physicsObj.SetLinearVelocity( launchSpeed * launchDir );
+					}
+					UpdateVisuals();
+				}
+				if ( state != EXPLODED ) {
+					Explode( NULL, true );
 				}
 				break;
 			}

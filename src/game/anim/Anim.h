@@ -636,6 +636,8 @@ class idAnimator{
 	void						ForceUpdate( void );
 	void						ClearForceUpdate( void );
 	bool						CreateFrame( int animtime, bool force );
+	bool						CreatePresentationFrame( int animtime, idJointMat **jointsPtr );
+	void						ClearPresentationFrame( void );
 	bool						FrameHasChanged( int animtime ) const;
 	void						GetDelta( int fromtime, int totime, idVec3 &delta ) const;
 	bool						GetDeltaRotation( int fromtime, int totime, idMat3 &delta ) const;
@@ -689,6 +691,7 @@ class idAnimator{
 	const char *				GetJointName( jointHandle_t handle ) const;
 	int							GetChannelForJoint( jointHandle_t joint ) const;
 	bool						GetJointTransform( jointHandle_t jointHandle, int currenttime, idVec3 &offset, idMat3 &axis );
+	bool						GetPresentationJointTransform( jointHandle_t jointHandle, idVec3 &offset, idMat3 &axis ) const;
 	bool						GetJointLocalTransform( jointHandle_t jointHandle, int currentTime, idVec3 &offset, idMat3 &axis );
 
 	const animFlags_t			GetAnimFlags( int animnum ) const;
@@ -728,8 +731,10 @@ private:
 	idList<jointMod_t *>		jointMods;
 	int							numJoints;
 	idJointMat *				joints;
+	idJointMat *				presentationJoints;
 
 	mutable int					lastTransformTime;		// mutable because the value is updated in CreateFrame
+	bool						presentationJointsValid;		// transient draw-only state; never serialized
 	mutable bool				stoppedAnimatingUpdate;
 	bool						removeOriginOffset;
 	bool						forceUpdate;

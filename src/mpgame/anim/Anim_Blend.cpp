@@ -3435,7 +3435,9 @@ idAnimator::idAnimator() {
 	entity					= NULL;
 	numJoints				= 0;
 	joints					= NULL;
+	presentationJoints		= NULL;
 	lastTransformTime		= -1;
+	presentationJointsValid	= false;
 	stoppedAnimatingUpdate	= false;
 	removeOriginOffset		= false;
 	forceUpdate				= false;
@@ -3478,7 +3480,7 @@ idAnimator::Allocated
 size_t idAnimator::Allocated( void ) const {
 	size_t	size;
 
-	size = jointMods.Allocated() + numJoints * sizeof( joints[0] ) + jointMods.Num() * sizeof( jointMods[ 0 ] ) + AFPoseJointMods.Allocated() + AFPoseJointFrameSize * sizeof( AFPoseJointFrame[0] ) + AFPoseJoints.Allocated();
+	size = jointMods.Allocated() + numJoints * sizeof( joints[0] ) + ( presentationJoints ? numJoints * sizeof( presentationJoints[0] ) : 0 ) + jointMods.Num() * sizeof( jointMods[ 0 ] ) + AFPoseJointMods.Allocated() + AFPoseJointFrameSize * sizeof( AFPoseJointFrame[0] ) + AFPoseJoints.Allocated();
 
 	return size;
 }
@@ -3637,6 +3639,9 @@ void idAnimator::FreeData( void ) {
 
 	Mem_Free16( joints );
 	joints = NULL;
+	Mem_Free16( presentationJoints );
+	presentationJoints = NULL;
+	presentationJointsValid = false;
 	numJoints = 0;
 
 	modelDef = NULL;
@@ -4889,6 +4894,10 @@ bool idAnimator::CreateFrame( int currentTime, bool force ) {
 
 	static idCVar		r_showSkel( "r_showSkel", "0", CVAR_RENDERER | CVAR_INTEGER, "draw the skeleton when model animates, 1 = draw model with skeleton, 2 = draw skeleton only, 3 = draw joints only", 0, 3, idCmdSystem::ArgCompletion_Integer<0,3> );
 
+	// Any authoritative evaluation or animation-state refresh invalidates the
+	// draw-only joints before the normal early-outs below.
+	presentationJointsValid = false;
+
 	if ( gameLocal.inCinematic && gameLocal.skipCinematic ) {
 		return false;
 	}
@@ -5147,11 +5156,95 @@ bool idAnimator::CreateFrame( int currentTime, bool force ) {
 
 /*
 =====================
+idAnimator::CreatePresentationFrame
+
+Evaluate an arbitrary draw time into a separate aligned joint buffer.  The
+renderer may ask for a pose between authoritative tics, but that must not
+replace the joints used by gameplay queries or advance angular joint mods.
+=====================
+*/
+bool idAnimator::CreatePresentationFrame( int currentTime, idJointMat **jointsPtr ) {
+	if ( jointsPtr == NULL ) {
+		return false;
+	}
+	*jointsPtr = NULL;
+
+	if ( !modelDef || !modelDef->ModelHandle() || joints == NULL || numJoints <= 0 ) {
+		return false;
+	}
+
+	if ( presentationJoints == NULL ) {
+		presentationJoints = ( idJointMat * )Mem_Alloc16( numJoints * sizeof( presentationJoints[0] ), MA_ANIM );
+	}
+	presentationJointsValid = false;
+
+	// AF poses are current physics snapshots, and angular joint mods integrate
+	// state from their last authoritative sample.  Neither can be rewound by
+	// evaluating at an earlier draw time, so keep those skeletons authoritative.
+	bool canEvaluateAtPresentationTime = AFPoseJoints.Num() == 0;
+	for ( int i = 0; canEvaluateAtPresentationTime && i < jointMods.Num(); i++ ) {
+		canEvaluateAtPresentationTime = jointMods[i]->angularVelocity.GetStartTime() == 0;
+	}
+	if ( !canEvaluateAtPresentationTime ) {
+		SIMDProcessor->Memcpy( presentationJoints, joints, numJoints * sizeof( presentationJoints[0] ) );
+		presentationJointsValid = true;
+		*jointsPtr = presentationJoints;
+		return true;
+	}
+
+	// CreateFrame writes through the animator's joints pointer and updates a
+	// small amount of cache/joint-mod state.  Redirect the output and restore
+	// every mutable field afterwards so the presentation pass is observational
+	// only from gameplay's point of view.
+	SIMDProcessor->Memcpy( presentationJoints, joints, numJoints * sizeof( presentationJoints[0] ) );
+	idJointMat *authoritativeJoints = joints;
+	const int authoritativeTransformTime = lastTransformTime;
+	const bool authoritativeStoppedAnimatingUpdate = stoppedAnimatingUpdate;
+
+	idMat3 *authoritativeJointModMats = NULL;
+	int *authoritativeJointModTimes = NULL;
+	const int numJointMods = jointMods.Num();
+	if ( numJointMods > 0 ) {
+		authoritativeJointModMats = ( idMat3 * )_alloca16( numJointMods * sizeof( authoritativeJointModMats[0] ) );
+		authoritativeJointModTimes = ( int * )_alloca16( numJointMods * sizeof( authoritativeJointModTimes[0] ) );
+		for ( int i = 0; i < numJointMods; i++ ) {
+			authoritativeJointModMats[i] = jointMods[i]->mat;
+			authoritativeJointModTimes[i] = jointMods[i]->lastTime;
+		}
+	}
+
+	joints = presentationJoints;
+	CreateFrame( currentTime, true );
+	joints = authoritativeJoints;
+	lastTransformTime = authoritativeTransformTime;
+	stoppedAnimatingUpdate = authoritativeStoppedAnimatingUpdate;
+	for ( int i = 0; i < numJointMods; i++ ) {
+		jointMods[i]->mat = authoritativeJointModMats[i];
+		jointMods[i]->lastTime = authoritativeJointModTimes[i];
+	}
+
+	presentationJointsValid = true;
+	*jointsPtr = presentationJoints;
+	return true;
+}
+
+/*
+=====================
+idAnimator::ClearPresentationFrame
+=====================
+*/
+void idAnimator::ClearPresentationFrame( void ) {
+	presentationJointsValid = false;
+}
+
+/*
+=====================
 idAnimator::ForceUpdate
 =====================
 */
 void idAnimator::ForceUpdate( void ) {
 	lastTransformTime = -1;
+	presentationJointsValid = false;
 	forceUpdate = true;
 }
 
@@ -5185,6 +5278,26 @@ bool idAnimator::GetJointTransform( jointHandle_t jointHandle, int currentTime, 
 	offset = joints[ jointHandle ].ToVec3();
 	axis = joints[ jointHandle ].ToMat3();
 
+	return true;
+}
+
+/*
+=====================
+idAnimator::GetPresentationJointTransform
+=====================
+*/
+bool idAnimator::GetPresentationJointTransform( jointHandle_t jointHandle, idVec3 &offset, idMat3 &axis ) const {
+	if ( !presentationJointsValid || !modelDef || ( jointHandle < 0 ) || ( jointHandle >= modelDef->NumJoints() ) ) {
+		return false;
+	}
+	if ( g_perfTest_noJointTransform.GetBool() ) {
+		offset = entity->GetPhysics()->GetCenterMass() - entity->GetPhysics()->GetOrigin();
+		axis = entity->GetRenderEntity()->axis;
+		return true;
+	}
+
+	offset = presentationJoints[ jointHandle ].ToVec3();
+	axis = presentationJoints[ jointHandle ].ToMat3();
 	return true;
 }
 

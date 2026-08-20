@@ -424,6 +424,20 @@ void rvViewWeapon::UpdatePresentationModel( void ) {
 	}
 
 	renderEntity_t presentationRenderEntity = renderEntity;
+	const int presentationTime = gameLocal.GetPresentationAnimationTimeMsec();
+	idAnimator *presentationAnimator = GetAnimator();
+	bool hasPresentationJoints = false;
+	if ( presentationAnimator != NULL && presentationTime >= 0 && presentationTime != gameLocal.time ) {
+		presentationAnimator->CreateFrame( gameLocal.time, false );
+		idJointMat *presentationJoints = NULL;
+		hasPresentationJoints = presentationAnimator->CreatePresentationFrame( presentationTime, &presentationJoints );
+		if ( hasPresentationJoints ) {
+			presentationRenderEntity.callback = NULL;
+			presentationRenderEntity.numJoints = presentationAnimator->NumJoints();
+			presentationRenderEntity.joints = presentationJoints;
+			presentationRenderEntity.hModel->BoundsFromJoints( presentationJoints, presentationRenderEntity.bounds );
+		}
+	}
 	idVec3 origin;
 	idMat3 axis;
 	if ( GetPhysicsToVisualTransform( origin, axis ) ) {
@@ -434,14 +448,19 @@ void rvViewWeapon::UpdatePresentationModel( void ) {
 		presentationRenderEntity.origin = GetPhysics()->GetOrigin();
 	}
 
+	presentationPoseHeld = true;
 	if ( modelDefHandle == -1 ) {
 		modelDefHandle = gameRenderWorld->AddEntityDef( &presentationRenderEntity );
 	} else {
 		gameRenderWorld->UpdateEntityDef( modelDefHandle, &presentationRenderEntity );
 	}
 
-	UpdatePresentationClientEntities();
+	UpdatePresentationClientEntities( presentationTime );
 	weapon->UpdatePresentationEffects();
+	presentationPoseHeld = false;
+	if ( hasPresentationJoints ) {
+		presentationAnimator->ClearPresentationFrame();
+	}
 }
 
 /*
@@ -456,13 +475,13 @@ muzzle; without it they sit on the last 60 Hz pose while the view model is
 drawn interpolated, and visibly unstick whenever the view is turning.
 ================
 */
-void rvViewWeapon::UpdatePresentationClientEntities( void ) {
+void rvViewWeapon::UpdatePresentationClientEntities( int presentationTime ) {
 	rvClientEntity *cent;
 	rvClientEntity *next;
 
 	for ( cent = clientEntities.Next(); cent != NULL; cent = next ) {
 		next = cent->bindNode.Next();
-		cent->UpdatePresentationTransform();
+		cent->UpdatePresentationTransform( presentationTime );
 	}
 }
 
@@ -1342,11 +1361,15 @@ rvWeapon::Think
 */
 void rvWeapon::Think ( void ) {
 
-	// Cache the authoritative player origin and axis.
-	playerViewOrigin = owner->firstPersonViewOrigin;
-	playerViewAxis   = owner->firstPersonViewAxis;
-	CalculateViewModelTransform( playerViewOrigin, playerViewAxis, viewModelOrigin, viewModelAxis );
-	UpdatePresentationViewModelState( playerViewOrigin, playerViewAxis, viewModelOrigin, viewModelAxis );
+	// Prediction can replay this weapon without advancing the authoritative
+	// frame.  Preserve the last real endpoint so the presentation interpolation
+	// history cannot be overwritten by a client reconciliation pass.
+	if ( gameLocal.isNewFrame || presentationViewModelTime < 0 ) {
+		playerViewOrigin = owner->firstPersonViewOrigin;
+		playerViewAxis = owner->firstPersonViewAxis;
+		CalculateViewModelTransform( playerViewOrigin, playerViewAxis, viewModelOrigin, viewModelAxis );
+		UpdatePresentationViewModelState( playerViewOrigin, playerViewAxis, viewModelOrigin, viewModelAxis );
+	}
 
 	if ( viewModel ) {
 		// set the physics position and orientation
@@ -2711,7 +2734,9 @@ This returns the offset and axis of a weapon bone in world space, suitable for a
 bool rvWeapon::GetGlobalJointTransform ( bool view, const jointHandle_t jointHandle, idVec3 &origin, idMat3 &axis, const idVec3& offset ) {
 	if ( view) {
 		// view model
-		if ( viewModel && viewAnimator->GetJointTransform( jointHandle, gameLocal.time, origin, axis ) ) {
+		if ( viewModel &&
+			 ( viewAnimator->GetPresentationJointTransform( jointHandle, origin, axis ) ||
+			   viewAnimator->GetJointTransform( jointHandle, gameLocal.time, origin, axis ) ) ) {
 			origin = offset * axis + origin;
 			origin = origin * ForeshortenAxis(viewModelAxis) + viewModelOrigin;
 			axis = axis * viewModelAxis;

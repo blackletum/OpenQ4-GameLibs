@@ -371,6 +371,8 @@ void idGameLocal::Clear( void ) {
 	presentationClockGameTime = -1;
 	presentationClockRealTime = 0;
 	presentationClockLastTime = -1;
+	presentationSceneFraction = -1.0f;
+	presentationAnimationTime = -1;
 	autoExecAfterMapLoadStartTime = 0;
 	autoExecAfterMapLoadPending = false;
 	autoExecAfterMapLoadWaitingLogged = false;
@@ -4680,9 +4682,27 @@ sample between authoritative game tics.
 ================
 */
 void idGameLocal::PreparePlayerSceneForRender( idPlayer *player ) {
+	presentationSceneFraction = -1.0f;
+	presentationAnimationTime = -1;
 	if ( player == NULL || GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
 		return;
 	}
+
+	// Freeze one draw sample before CalculateRenderView() asks for the camera
+	// fraction.  Animation lives on the previous-to-current interval, whereas
+	// renderView.time is the current tic plus the same elapsed offset.
+	const int authoritativeInterval = Max( 0, time - previousTime );
+	presentationSceneFraction = GetPresentationInterpolationFraction();
+	const int maxSequentialInterval = static_cast<int>( idMath::Ceil( common->GetUserCmdMsecFloat() ) );
+	const bool sequentialInterval = authoritativeInterval > 0 && authoritativeInterval <= maxSequentialInterval &&
+		GetMHz() == common->GetUserCmdHz();
+	if ( sequentialInterval ) {
+		const int presentationOffset = idMath::Ftoi( authoritativeInterval * presentationSceneFraction + 0.5f );
+		presentationAnimationTime = idMath::ClampInt( previousTime, time, previousTime + presentationOffset );
+	} else {
+		presentationAnimationTime = time;
+	}
+	player->CalculateRenderView();
 
 	// Movers and everything riding them share the camera's presentation time.
 	// Without this the eye is drawn interpolated while the lift under it is
@@ -4693,13 +4713,19 @@ void idGameLocal::PreparePlayerSceneForRender( idPlayer *player ) {
 	if ( player->IsPresentationViewInterpolated() ) {
 		UpdatePresentationEntityPoses();
 	} else {
+		presentationSceneFraction = -1.0f;
+		presentationAnimationTime = -1;
 		ClearPresentationEntityPoses();
 	}
 
-	player->CalculateRenderView();
 	if ( player->weaponViewModel.GetEntity() != NULL ) {
 		player->weaponViewModel->UpdatePresentationWeapon( player->CanShowWeaponViewmodel() );
 	}
+}
+
+void idGameLocal::EndPresentationSceneForRender( void ) {
+	presentationSceneFraction = -1.0f;
+	presentationAnimationTime = -1;
 }
 
 /*
@@ -4742,6 +4768,7 @@ bool idGameLocal::Draw( int clientNum ) {
 // RAVEN END
 	// render the scene
 	player->playerView.RenderPlayerView( player->hud );
+	EndPresentationSceneForRender();
 
 // RAVEN BEGIN
 // bdube: debugging HUD
@@ -8294,8 +8321,13 @@ float idGameLocal::GetPresentationInterpolationFraction( void ) const {
 		return 1.0f;
 	}
 
+	if ( presentationSceneFraction >= 0.0f ) {
+		return presentationSceneFraction;
+	}
+
+	const int presentationOffset = GetPresentationTimeMsec() - time;
 	return idMath::ClampFloat( 0.0f, 1.0f,
-		static_cast<float>( GetPresentationTimeMsec() - time ) / ticMsec );
+		static_cast<float>( presentationOffset ) / ticMsec );
 }
 
 /*

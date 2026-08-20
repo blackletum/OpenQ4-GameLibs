@@ -1505,6 +1505,12 @@ void idProjectile::ClientPredictionThink( void ) {
 	if ( !renderEntity.hModel && clientEntities.IsListEmpty() ) {
 		return;
 	}
+	// Prediction may replay the same authoritative snapshot while reconciling a
+	// remote client.  Do not advance physics or effect ownership more than once
+	// for that snapshot; repeated presentation frames only resubmit transforms.
+	if ( !gameLocal.isNewFrame ) {
+		return;
+	}
 	if ( !syncPhysics && state == LAUNCHED ) {
 		idMat3 axis = launchDir.ToMat3();
 		idVec3 origin( launchOrig );
