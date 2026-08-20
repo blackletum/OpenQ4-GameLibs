@@ -820,7 +820,8 @@ idMD5Anim::LoadAnim
 bool idMD5Anim::LoadAnim( const char *filename ) {
 	fileSystem->RecordLevelLoadResource( LEVEL_LOAD_RESOURCE_ANIMATION,
 		filename, "md5anim", 0, 2 );
-	if ( g_useGeneratedAnimCache.GetBool() && LoadGeneratedAnim( filename ) ) {
+	if ( cvarSystem->GetCVarBool( "com_levelLoadModernization" ) &&
+		g_useGeneratedAnimCache.GetBool() && LoadGeneratedAnim( filename ) ) {
 		return true;
 	}
 
@@ -1003,7 +1004,8 @@ bool idMD5Anim::LoadAnim( const char *filename ) {
 		parser.Error( "Animation duration is out of range" );
 	}
 
-	if ( g_writeGeneratedAnimCache.GetBool() ) {
+	if ( cvarSystem->GetCVarBool( "com_levelLoadModernization" ) &&
+		g_writeGeneratedAnimCache.GetBool() ) {
 		WriteGeneratedAnim( filename );
 	}
 
