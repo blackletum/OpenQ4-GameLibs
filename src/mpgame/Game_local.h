@@ -356,6 +356,11 @@ enum {
 	// openQ4: server driven announcer cue.  The announcer queue is client local,
 	// so a cue that only server-side game logic knows about needs its own channel.
 	GAME_RELIABLE_MESSAGE_ANNOUNCER,
+	// Round turnover resets world entities while retaining the live match state.
+	// Keep distinct from RESTART, which may change the gametype and session.
+	GAME_RELIABLE_MESSAGE_ROUNDRESTART,
+	// Insert future wire messages before this sentinel; never serialize COUNT.
+	GAME_RELIABLE_MESSAGE_COUNT,
 };
 
 enum {

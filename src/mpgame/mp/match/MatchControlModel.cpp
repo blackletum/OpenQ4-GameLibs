@@ -1038,12 +1038,20 @@ bool mpMatchControlModel::OperationContextAccepted(
 	}
 
 	switch ( opcode ) {
-		case MP_MATCH_OP_SERIES_ADVANCE:
+		case MP_MATCH_OP_SERIES_ADVANCE: {
+			const mpMatchViewOperationAvailability_t *advance =
+				OperationAvailability( opcode );
+			// A server-restored completed map opens in warmup. The accepted
+			// recipient decision is the authority for continuing that review;
+			// the client cannot infer recovery from the public series alone.
+			const bool recoveredReview = phase == WARMUP && advance != NULL &&
+				advance->available && advance->reason == MP_MATCH_PROTOCOL_REASON_OK;
 			return series.present &&
-				( ( phase == GAMEREVIEW &&
+				( ( ( phase == GAMEREVIEW || recoveredReview ) &&
 					series.state == MP_MATCH_VIEW_SERIES_MAP_COMPLETE ) ||
 				( ( phase == WARMUP || phase == NEXTGAME ) &&
 					series.state == MP_MATCH_VIEW_SERIES_READY ) );
+		}
 
 		case MP_MATCH_OP_SERIES_CONTESTANT_BIND:
 			return series.present && series.gameType == GAME_DUEL &&
@@ -1265,7 +1273,8 @@ bool mpMatchControlModel::CanChooseActionSide( int side ) const {
 }
 
 bool mpMatchControlModel::ActionSideUsesCompetitionLabels( void ) const {
-	return ready && series.present && series.gameType == GAME_DUEL;
+	return ready && ( ( series.present && series.gameType == GAME_DUEL ) ||
+		( !IsPlayableSide( recipient.side ) && IsPlayableSide( recipient.competitionSide ) ) );
 }
 
 bool mpMatchControlModel::SetSeriesProfileChoice(
@@ -1386,7 +1395,8 @@ bool mpMatchControlModel::BuildRequest( mpMatchControlCommand_t command,
 
 		case MP_MATCH_CONTROL_COMMAND_TIMEOUT: {
 			int targetSide = MP_MATCH_VIEW_SIDE_NONE;
-			if ( !ResolveActionSide( true, false, targetSide ) ) {
+			const bool contestant = ActionSideUsesCompetitionLabels();
+			if ( !ResolveActionSide( !contestant, contestant, targetSide ) ) {
 				SetError( error,
 					actionSideChoice == MP_MATCH_CONTROL_SIDE_CHOICE_NONE ?
 						MP_MATCH_CONTROL_ERROR_SELECTION_REQUIRED :

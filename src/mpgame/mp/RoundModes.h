@@ -7,7 +7,7 @@
 // All three share the round machine in rvRoundGameState and differ only in
 // what a death means: in Clan Arena it removes you until the next round, in
 // Freeze Tag it leaves a body a team mate can thaw, and in Red Rover it moves
-// you onto the killer's team.
+// you onto the opposite side.
 //----------------------------------------------------------------
 
 #ifndef __ROUNDMODES_H__
@@ -71,6 +71,7 @@ public:
 	virtual void	ShiftMatchTime( int deltaMsec );
 	virtual void	PlayerDeath( idPlayer* dead, idPlayer* killer );
 	virtual void	ClientDisconnect( idPlayer* player );
+	void			ReportThawState( void ) const;
 
 	// frozen players stay on their own body instead of becoming spectators
 	virtual bool	EliminatedBecomesSpectator( void ) const { return false; }
@@ -105,7 +106,7 @@ private:
 
 rvRedRoverGameState
 
-A kill moves the victim onto the killer's team, so the round ends when one
+A death moves the victim onto the opposite side, so the round ends when one
 side has absorbed everybody.  Nobody is eliminated, so respawns stay normal
 and only the team assignment changes.
 
@@ -119,6 +120,7 @@ class rvRedRoverGameState : public rvRoundGameState {
 public:
 					rvRedRoverGameState( bool allocPrevious = true );
 
+	virtual bool	NewState( mpGameState_t newState );
 	virtual void	PlayerDeath( idPlayer* dead, idPlayer* killer );
 
 	virtual	bool	IsType( gameStateType_t type ) const;

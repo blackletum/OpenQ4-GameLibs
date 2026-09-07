@@ -420,6 +420,7 @@ extern idCVar	si_mapCycle;
 extern idCVar	si_arenaCampaign;
 extern idCVar	g_matchProfile;
 extern idCVar	si_matchRules;
+extern idCVar	si_managedMatch;
 extern idCVar	g_refPassword;
 extern idCVar	g_matchEvidence;
 extern idCVar	g_matchSeriesRecoveryId;

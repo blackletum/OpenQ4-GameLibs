@@ -1580,6 +1580,88 @@ idGameLocal::LoadMap
 Initializes all map variables common to both save games and spawned games.
 ===================
 */
+// Retail CTF maps have the two scoring bases but no neutral flag. Add the
+// existing neutral-flag entity at the most central unteamed pickup location.
+// This uses authored, reachable item positions instead of guessing a point in
+// solid geometry. Prepare the same entity list for every mode on both peers;
+// normal entity filtering keeps the extra slot empty outside One Flag.
+static void AddMissingNeutralFlag( idMapFile *map ) {
+	idVec3 bases[ TEAM_MAX ];
+	bool foundBase[ TEAM_MAX ] = { false, false };
+	for ( int index = 1; index < map->GetNumEntities(); ++index ) {
+		idDict args = map->GetEntity( index )->epairs;
+		const idDeclEntityDef *definition = gameLocal.FindEntityDef( args.GetString( "classname" ), false );
+		if ( definition == NULL ) {
+			continue;
+		}
+		args.SetDefaults( &definition->dict );
+		if ( idStr::Icmp( args.GetString( "spawnclass" ), "rvItemCTFFlag" ) != 0 ||
+			args.GetBool( "dropped" ) || args.GetBool( "not_multiplayer" ) ) {
+			continue;
+		}
+		const int team = args.GetInt( "team", "-1" );
+		if ( team == TEAM_MAX ) {
+			return; // A map author's objective always takes precedence.
+		}
+		if ( team >= 0 && team < TEAM_MAX ) {
+			foundBase[ team ] = args.GetVector( "origin", "0 0 0", bases[ team ] );
+		}
+	}
+	if ( !foundBase[ TEAM_MARINE ] || !foundBase[ TEAM_STROGG ] ||
+		gameLocal.FindEntityDef( "mp_ctf_one_flag", false ) == NULL ) {
+		return;
+	}
+
+	int selected = -1;
+	float bestDistance = idMath::INFINITY;
+	for ( int index = 1; index < map->GetNumEntities(); ++index ) {
+		const idDict &args = map->GetEntity( index )->epairs;
+		const char *classname = args.GetString( "classname" );
+		if ( idStr::FindText( classname, "item_" ) != 0 &&
+			idStr::FindText( classname, "weapon_" ) != 0 &&
+			idStr::FindText( classname, "powerup_" ) != 0 ) {
+			continue;
+		}
+		idVec3 origin;
+		if ( args.GetBool( "not_multiplayer" ) || *args.GetString( "team" ) != '\0' ||
+			!args.GetVector( "origin", "0 0 0", origin ) ) {
+			continue;
+		}
+		// Minimize the longer straight-line distance to either base. Map order
+		// breaks exact ties deterministically on the server and clients.
+		const float distance = Max( ( origin - bases[ TEAM_MARINE ] ).LengthSqr(),
+			( origin - bases[ TEAM_STROGG ] ).LengthSqr() );
+		if ( distance < bestDistance ) {
+			bestDistance = distance;
+			selected = index;
+		}
+	}
+	if ( selected < 0 ) {
+		return;
+	}
+
+	idStr name = "openq4_neutral_flag";
+	for ( int suffix = 1; ; ++suffix ) {
+		bool inUse = false;
+		for ( int index = 1; index < map->GetNumEntities(); ++index ) {
+			if ( name.Icmp( map->GetEntity( index )->epairs.GetString( "name" ) ) == 0 ) {
+				inUse = true;
+				break;
+			}
+		}
+		if ( !inUse ) {
+			break;
+		}
+		name = va( "openq4_neutral_flag_%d", suffix );
+	}
+	idMapEntity *flag = new idMapEntity;
+	flag->epairs.Set( "classname", "mp_ctf_one_flag" );
+	flag->epairs.Set( "name", name.c_str() );
+	flag->epairs.Set( "origin", map->GetEntity( selected )->epairs.GetString( "origin" ) );
+	flag->epairs.SetBool( "nodrop", true );
+	map->AddEntity( flag );
+}
+
 void idGameLocal::LoadMap( const char *mapName, int randseed ) {
 	int i;
 // RAVEN BEGIN
@@ -1648,6 +1730,9 @@ void idGameLocal::LoadMap( const char *mapName, int randseed ) {
 	phaseStartMsec = Sys_Milliseconds();
 	if ( !mapFile->ApplyEntityStringFiles() ) {
 		Error( "Couldn't apply entity-string files for %s", mapName );
+	}
+	if ( isMultiplayer ) {
+		AddMissingNeutralFlag( mapFile );
 	}
 	entityStringMsec = Sys_Milliseconds() - phaseStartMsec;
 	if ( cvarSystem->GetCVarBool( "com_showLevelLoadTimes" ) ) {
@@ -2906,6 +2991,7 @@ idGameLocal::MapShutdown
 void idGameLocal::MapShutdown( void ) {
 	Printf( "------------ Game Map Shutdown --------------\n" );
 
+	mpGame.PrepareForMapShutdown();
 	gamestate = GAMESTATE_SHUTDOWN;
 
 	// The navmesh describes the map that is going away.
@@ -5965,7 +6051,18 @@ bool idGameLocal::InhibitEntitySpawn( idDict &spawnArgs ) {
 // bdube: suppress ents that don't match the entity filter
 	const char* entityFilter;
 	if ( serverInfo.GetString( "si_entityFilter", "", &entityFilter ) && *entityFilter ) {
-		if ( spawnArgs.MatchPrefix ( "filter_" ) && !spawnArgs.GetBool ( va("filter_%s", entityFilter) ) ) {
+		bool allowed = spawnArgs.GetBool( va( "filter_%s", entityFilter ) );
+		// One Flag uses the stock CTF layout when a map has no mode-specific
+		// setting. Explicit One Flag inclusions and exclusions take precedence.
+		const mpGameTypeInfo_t *mode = MPGameType( gameType );
+		if ( isMultiplayer && MPGameTypeHasAny( gameType, GTF_ONEFLAG ) &&
+			idStr::Icmp( entityFilter, mode->entityFilter ) == 0 ) {
+			const idKeyValue *specific = spawnArgs.FindKey( va( "filter_%s", mode->name ) );
+			if ( specific != NULL ) {
+				allowed = spawnArgs.GetBool( specific->GetKey() );
+			}
+		}
+		if ( spawnArgs.MatchPrefix( "filter_" ) && !allowed ) {
 			return true;
 		}
 	}
@@ -8380,6 +8477,13 @@ observed lag, which is the boundary itself.
 ================
 */
 float idGameLocal::GetPresentationTicFraction( void ) const {
+	// Stop-time keeps the last simulation sample, but real time still advances.
+	// Re-anchoring that unchanged sample every maxDrift interval would cycle
+	// movers between their previous and current poses, repeatedly invalidating
+	// shadow depth and visibly shifting doors while their physics is frozen.
+	if ( !isMultiplayer && g_stopTime.GetBool() ) {
+		return 1.0f;
+	}
 	// Real seconds per authoritative tic.  Distinct from GetMSec(), which is how
 	// much *game* time a tic adds -- an exact 1000/Hz against an integer 16 at
 	// 60Hz.  Dividing the elapsed real time by the game figure is what used to
@@ -8425,7 +8529,7 @@ Maps the engine's presentation clock onto the current simulation snapshot.
 ================
 */
 int idGameLocal::GetPresentationTimeMsec( void ) const {
-	if ( GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
+	if ( ( !isMultiplayer && g_stopTime.GetBool() ) || GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
 		return time;
 	}
 

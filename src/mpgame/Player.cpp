@@ -3943,15 +3943,28 @@ bool idPlayer::UserInfoChanged( void ) {
 			// Managed userinfo has already been reconciled through the authoritative
 			// join/queue/roster evaluator.  Do not overwrite that accepted result
 			// with the stock initial-join menu default afterward.
-			initialJoinPending = false;
-			initialJoinSpectateApplied = true;
-			initialJoinMenuPending = false;
-			if ( !userInfo->GetBool( "ui_joined", "0" ) ) {
-				userInfo->SetBool( "ui_joined", true );
-				modifiedInfo = true;
-			}
-			if ( IsLocalClient() ) {
-				cvarSystem->SetCVarBool( "ui_joined", true );
+			// The listen host spawns before the session enters warmup. Keep its
+			// one-shot auto-join intent pending while admission is unavailable;
+			// the server retries it through the same evaluator on the next frame.
+			if ( gameLocal.mpGame.GetMatchSession().GetPhase() != INACTIVE &&
+				userInfo->FindKey( "ui_autoJoin" ) != NULL ) {
+				initialJoinPending = false;
+				initialJoinSpectateApplied = true;
+				initialJoinMenuPending = false;
+				if ( !userInfo->GetBool( "ui_joined", "0" ) ) {
+					userInfo->SetBool( "ui_joined", true );
+					modifiedInfo = true;
+				}
+				if ( IsLocalClient() ) {
+					cvarSystem->SetCVarBool( "ui_joined", true );
+					cvarSystem->SetCVarString( "ui_spectate", spec ? "Spectate" : "Play" );
+				}
+				// Spawn can invoke this directly, and an outer userinfo broadcast
+				// may still hold the pre-admission dictionary. Publish the final
+				// one-shot decision after that caller has completed its broadcast.
+				// Insert it so a looping config cannot starve the publication.
+				cmdSystem->BufferCommandText( CMD_EXEC_INSERT,
+					va( "updateUI %d\n", entityNumber ) );
 			}
 		} else if ( userInfo->GetBool( "ui_autoJoin", "0" ) ) {
 			initialJoinPending = false;
@@ -7448,26 +7461,138 @@ idPlayer::SpectateCycle
 void idPlayer::SpectateCycle( void ) {
 	if ( gameLocal.time > lastSpectateChange ) {
 		lastSpectateChange = gameLocal.time + 500;
-		int candidateSlot = spectator;
-		for ( int attempt = 0; attempt < gameLocal.numClients; ++attempt ) {
-			candidateSlot = gameLocal.GetNextClientNum( candidateSlot );
-			idPlayer *candidate = gameLocal.GetClientByNum( candidateSlot );
-			if ( candidate == NULL || candidate->spectating ||
-				!gameLocal.mpGame.CanSpectatorFollow( entityNumber,
-					candidateSlot ) ) {
-				continue;
-			}
-			// Do not mutate the camera target until the fresh server-side
-			// binding and disclosure checks have accepted this candidate.
-			spectator = candidateSlot;
-			candidate->UpdateHudWeapon( candidate->currentWeapon );
+		CycleSpectatorFollow( 1 );
+	}
+}
+
+static idPlayer *SpectatorFollowClient( int slot ) {
+	// GetClientByNum deliberately maps an out-of-range index back to slot zero;
+	// command targets need exact slot/type validation instead of that fallback.
+	if ( slot < 0 || slot >= MAX_CLIENTS || slot >= gameLocal.numClients ||
+		gameLocal.entities[slot] == NULL || !gameLocal.entities[slot]->IsType( idPlayer::GetClassType() ) ) {
+		return NULL;
+	}
+	idPlayer *player = static_cast<idPlayer *>( gameLocal.entities[slot] );
+	return player->IsFakeClient() ? NULL : player;
+}
+
+bool idPlayer::CycleSpectatorFollow( int direction ) {
+	if ( direction != 1 && direction != -1 ) {
+		return false;
+	}
+	const int count = Min( gameLocal.numClients, MAX_CLIENTS );
+	const int start = spectator >= 0 && spectator < count ? spectator : ( direction > 0 ? -1 : 0 );
+	for ( int attempt = 1; attempt <= count; ++attempt ) {
+		const int candidateSlot = ( start + direction * attempt + count ) % count;
+		idPlayer *candidate = SpectatorFollowClient( candidateSlot );
+		if ( candidate == NULL || candidate->spectating ||
+			!gameLocal.mpGame.CanSpectatorFollow( entityNumber, candidateSlot ) ) {
+			continue;
+		}
+		// Attack and console cycling share this fresh authorization check.
+		spectator = candidateSlot;
+		candidate->UpdateHudWeapon( candidate->currentWeapon );
+		return true;
+	}
+	SpectateFreeFly( true );
+	return false;
+}
+
+void idPlayer::RequestSpectatorFollow( spectatorFollow_t operation, int targetSlot ) {
+	if ( !gameLocal.isMultiplayer || gameLocal.GetLocalPlayer() != this ||
+		gameLocal.GetDemoState() != DEMO_NONE || gameLocal.isRepeater ||
+		entityNumber < 0 || entityNumber >= MAX_CLIENTS || IsFakeClient() || !spectating ) {
+		common->Printf( "%s\n", common->GetLocalizedString( "#str_42881" ) );
+		return;
+	}
+	int targetSpawnId = 0;
+	if ( operation == SPECTATOR_FOLLOW_PLAYER ) {
+		idPlayer *target = SpectatorFollowClient( targetSlot );
+		if ( target == NULL ) {
+			common->Printf( "%s\n", common->GetLocalizedString( "#str_42882" ) );
 			return;
 		}
-
-		// No authorized player target exists.  Self means free-fly and cannot
-		// retain a POV that became private while the observer was cycling.
-		SpectateFreeFly( true );
+		targetSpawnId = gameLocal.GetSpawnId( target );
 	}
+	if ( gameLocal.isServer ) {
+		ServerSpectatorFollow( operation, targetSlot, targetSpawnId );
+	} else if ( gameLocal.isClient ) {
+		idBitMsg request;
+		byte buffer[6];
+		request.Init( buffer, sizeof( buffer ) );
+		request.BeginWriting();
+		request.WriteByte( operation );
+		request.WriteByte( targetSlot + 1 );
+		request.WriteLong( targetSpawnId );
+		// The existing event envelope proves this player's current spawn and
+		// sender ownership before dispatch. Target identity is checked again.
+		ClientSendEvent( EVENT_SPECTATOR_FOLLOW, &request );
+	}
+}
+
+void idPlayer::ServerSpectatorFollow( int operation, int targetSlot, int targetSpawnId ) {
+	if ( !gameLocal.isServer || !gameLocal.isMultiplayer || gameLocal.isRepeater ||
+		SpectatorFollowClient( entityNumber ) != this || botManager.IsBot( entityNumber ) ||
+		!gameLocal.mpGame.IsInGame( entityNumber ) ||
+		operation < SPECTATOR_FOLLOW_NEXT || operation > SPECTATOR_FOLLOW_PLAYER ||
+		( operation != SPECTATOR_FOLLOW_PLAYER && ( targetSlot != -1 || targetSpawnId != 0 ) ) ||
+		( operation == SPECTATOR_FOLLOW_PLAYER && ( targetSlot < 0 || targetSlot >= MAX_CLIENTS ) ) ) {
+		return;
+	}
+	// Rate-limit rejected requests as well as successful camera changes.
+	if ( gameLocal.time <= lastSpectateChange ) {
+		return;
+	}
+	lastSpectateChange = gameLocal.time + 500;
+	if ( !spectating ) {
+		gameLocal.ServerSendChatMessage( entityNumber, "server", "#str_42881", "" );
+		return;
+	}
+	if ( operation == SPECTATOR_FOLLOW_FREE ) {
+		SpectateFreeFly( true );
+		gameLocal.ServerSendChatMessage( entityNumber, "server", "#str_42884", "" );
+		return;
+	}
+	if ( operation == SPECTATOR_FOLLOW_NEXT || operation == SPECTATOR_FOLLOW_PREV ) {
+		if ( gameLocal.gameType == GAME_TOURNEY ) {
+			// Keep the bracket order, arena transitions and existing cooldown.
+			rvTourneyGameState *tourney = static_cast<rvTourneyGameState *>( gameLocal.mpGame.GetGameState() );
+			if ( operation == SPECTATOR_FOLLOW_NEXT ) {
+				tourney->SpectateCycleNext( this );
+			} else {
+				tourney->SpectateCyclePrev( this );
+			}
+		} else {
+			CycleSpectatorFollow( operation == SPECTATOR_FOLLOW_NEXT ? 1 : -1 );
+		}
+		if ( spectator == entityNumber ) {
+			gameLocal.ServerSendChatMessage( entityNumber, "server", "#str_42883", "" );
+		}
+		return;
+	}
+	idPlayer *target = SpectatorFollowClient( targetSlot );
+	if ( target == NULL || gameLocal.GetSpawnId( target ) != targetSpawnId ||
+		!gameLocal.mpGame.CanSpectatorFollow( entityNumber, targetSlot ) ) {
+		gameLocal.ServerSendChatMessage( entityNumber, "server", "#str_42882", "" );
+		return;
+	}
+	if ( gameLocal.gameType == GAME_TOURNEY ) {
+		const int arena = target->GetArena();
+		rvTourneyGameState *tourney = static_cast<rvTourneyGameState *>( gameLocal.mpGame.GetGameState() );
+		if ( arena < 0 || arena >= MAX_ARENAS ||
+			tourney->GetArena( arena ).GetState() == AS_INACTIVE || tourney->GetArena( arena ).GetState() == AS_DONE ||
+			( tourney->GetArenaPlayers( arena )[0] != target && tourney->GetArenaPlayers( arena )[1] != target ) ||
+			( arena != GetArena() && gameLocal.time <= lastArenaChange ) ) {
+			gameLocal.ServerSendChatMessage( entityNumber, "server", "#str_42882", "" );
+			return;
+		}
+		if ( arena != GetArena() ) {
+			JoinInstance( arena );
+			lastArenaChange = gameLocal.time + 2000;
+		}
+	}
+	spectator = targetSlot;
+	target->UpdateHudWeapon( target->currentWeapon );
 }
 
 /*
@@ -10308,11 +10433,39 @@ void idPlayer::GetAASLocation( idAAS *aas, idVec3 &pos, int &areaNum ) const {
 
 /*
 ==============
+idPlayer::UpdateEyeHeight
+==============
+*/
+void idPlayer::UpdateEyeHeight( bool snap ) {
+	float newEyeOffset;
+	if ( spectating ) {
+		newEyeOffset = 0.0f;
+	} else if ( health <= 0 ) {
+		newEyeOffset = pm_deadviewheight.GetFloat();
+	} else if ( physicsObj.IsCrouching() ) {
+		newEyeOffset = pm_crouchviewheight.GetFloat();
+	} else if ( IsInVehicle() ) {
+		newEyeOffset = 0.0f;
+	} else {
+		newEyeOffset = pm_normalviewheight.GetFloat();
+	}
+
+	if ( EyeHeight() != newEyeOffset ) {
+		if ( spectating || snap ) {
+			SetEyeHeight( newEyeOffset );
+		} else {
+			// smooth out duck height changes
+			SetEyeHeight( EyeHeight() * pm_crouchrate.GetFloat() + newEyeOffset * ( 1.0f - pm_crouchrate.GetFloat() ) );
+		}
+	}
+}
+
+/*
+==============
 idPlayer::Move
 ==============
 */
 void idPlayer::Move( void ) {
-	float newEyeOffset;
 	idVec3 oldOrigin;
 	idVec3 oldVelocity;
 	idVec3 pushVelocity;
@@ -10397,26 +10550,7 @@ void idPlayer::Move( void ) {
 		SetAASLocation(); 
 	}
 
-	if ( spectating ) {
-		newEyeOffset = 0.0f;
-	} else if ( health <= 0 ) {
-		newEyeOffset = pm_deadviewheight.GetFloat();
-	} else if ( physicsObj.IsCrouching() ) {
-		newEyeOffset = pm_crouchviewheight.GetFloat();
-	} else if ( IsInVehicle ( ) ) {
-		newEyeOffset = 0.0f;
-	} else {
-		newEyeOffset = pm_normalviewheight.GetFloat();
-	}
-
-	if ( EyeHeight() != newEyeOffset ) {
-		if ( spectating ) {
-			SetEyeHeight( newEyeOffset );
-		} else {
-			// smooth out duck height changes
-			SetEyeHeight( EyeHeight() * pm_crouchrate.GetFloat() + newEyeOffset * ( 1.0f - pm_crouchrate.GetFloat() ) );
-		}
-	}
+	UpdateEyeHeight( false );
 
 	if ( noclip || gameLocal.inCinematic || ( influenceActive == INFLUENCE_LEVEL2 ) ) {
 		pfl.crouch		= false;
@@ -10786,7 +10920,7 @@ void idPlayer::Think( void ) {
 	// openQ4: attack lockout.  Quake Live freezes weapons while a round is
 	// being set up or has just been decided; this is the equivalent of its
 	// PMF_ATTACK_LOCKOUT pmove flag, applied where the usercmd is taken in.
-	if ( gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
+	if ( !spectating && gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
 		usercmd.buttons &= ~BUTTON_ATTACK;
 	}
 
@@ -11397,7 +11531,8 @@ void idPlayer::Killed( idEntity *inflictor, idEntity *attacker, int damage, cons
 				lastKiller = NULL;
 			}
 
-			if ( health < -20 || killer->PowerUpActive( POWERUP_QUADDAMAGE ) ) {
+			if ( !MPGameTypeHasAny( gameLocal.gameType, GTF_FREEZE ) &&
+				( health < -20 || killer->PowerUpActive( POWERUP_QUADDAMAGE ) ) ) {
 				gibDeath = true;
 				gibDir = dir;
 				gibsLaunched = false;
@@ -13664,14 +13799,16 @@ void idPlayer::LocalClientPredictionThink( void ) {
 	buttonMask &= usercmd.buttons;
 	usercmd.buttons &= ~buttonMask;
 
-	if ( idealWeapon != currentWeapon ) {
+	// Spectators use attack to cycle cameras, including the offline demo viewer.
+	// Their inactive weapon state must not consume that camera command.
+	if ( !spectating && idealWeapon != currentWeapon ) {
 		usercmd.buttons &= ~BUTTON_ATTACK;		
 	}
 
 	// openQ4: attack lockout.  Quake Live freezes weapons while a round is
 	// being set up or has just been decided; this is the equivalent of its
 	// PMF_ATTACK_LOCKOUT pmove flag, applied where the usercmd is taken in.
-	if ( gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
+	if ( !spectating && gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
 		usercmd.buttons &= ~BUTTON_ATTACK;
 	}
 
@@ -13903,14 +14040,14 @@ void idPlayer::NonLocalClientPredictionThink( void ) {
 	usercmd.buttons &= ~buttonMask;
 
 	//jshepard: added this to make sure clients can see other clients and the host switching weapons
-	if ( idealWeapon != currentWeapon )	{
+	if ( !spectating && idealWeapon != currentWeapon )	{
 		usercmd.buttons &= ~BUTTON_ATTACK;		
 	}
 
 	// openQ4: attack lockout.  Quake Live freezes weapons while a round is
 	// being set up or has just been decided; this is the equivalent of its
 	// PMF_ATTACK_LOCKOUT pmove flag, applied where the usercmd is taken in.
-	if ( gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
+	if ( !spectating && gameLocal.isMultiplayer && gameLocal.mpGame.GetGameState() != NULL && gameLocal.mpGame.GetGameState()->WeaponsLocked() ) {
 		usercmd.buttons &= ~BUTTON_ATTACK;
 	}
 
@@ -14719,6 +14856,18 @@ bool idPlayer::ServerReceiveEvent( int event, int time, const idBitMsg &msg ) {
 
 	// client->server events
 	switch ( event ) {
+		case EVENT_SPECTATOR_FOLLOW: {
+			if ( msg.IsReadOverflowed() || msg.GetRemainingReadBits() != 48 ) {
+				return true;
+			}
+			const int operation = msg.ReadByte();
+			const int targetSlot = msg.ReadByte() - 1;
+			const int targetSpawnId = msg.ReadLong();
+			if ( !msg.IsReadOverflowed() ) {
+				ServerSpectatorFollow( operation, targetSlot, targetSpawnId );
+			}
+			return true;
+		}
 		case EVENT_IMPULSE: {
 			int impulse = msg.ReadBits( IMPULSE_NUMBER_OF_BITS );
 			serverReceiveEvent = true;	// marking so we know if ACKs are needed
@@ -15337,6 +15486,12 @@ ddynerman: Spawns client side gibs around this player
 */
 void idPlayer::ClientGib( const idVec3& dir ) {
 	
+	// The corpse is Freeze Tag's rescue objective on every peer. This also
+	// covers snapshot-driven gib requests after an overkill or suicide.
+	if ( gameLocal.isMultiplayer && MPGameTypeHasAny( gameLocal.gameType, GTF_FREEZE ) ) {
+		return;
+	}
+
 	if( !spawnArgs.GetBool( "gib" )	)	{
 		return;
 	}

@@ -150,6 +150,8 @@ def check_source_root(source_root: str) -> dict[str, str]:
         context,
     )
     require(tic_fraction, "common->GetUserCmdMsecFloat()", f"{context} usercmd cadence")
+    require(tic_fraction, "if ( !isMultiplayer && g_stopTime.GetBool() ) {\n\t\treturn 1.0f;",
+            f"{context} paused movers hold the authoritative sample")
     require(tic_fraction, "presentationClockRealTime +=", f"{context} predicted anchor")
     require(tic_fraction, "PRESENTATION_CLOCK_MAX_LATE_CORRECTION_MSEC", f"{context} creeping late correction")
     require(tic_fraction, "presentationClockRealTime = realTime;", f"{context} immediate early correction")
@@ -166,6 +168,7 @@ def check_source_root(source_root: str) -> dict[str, str]:
         context,
     )
     require(clock, "GetDemoState() == DEMO_PLAYING || IsTimeDemo()", f"{context} demo clock bypass")
+    require(clock, "!isMultiplayer && g_stopTime.GetBool()", f"{context} paused material clock bypass")
     require(clock, "GetPresentationTicFraction()", f"{context} single fraction source")
     require(clock, "const int maxOffset = Max( 0, GetMSec() );", f"{context} authoritative-tic clock bound")
     require(clock, "idMath::ClampInt( 0, maxOffset", f"{context} bounded clock offset")

@@ -417,6 +417,7 @@ typedef enum {
 	MP_MATCH_BLOCKER_TEAM_NOT_READY,
 	// Append-only: evidence and presentation persist the numeric blocker id.
 	MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_CONTESTANTS_PER_SIDE,
+	MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_PARTICIPANTS,
 	MP_MATCH_BLOCKER_COUNT
 } mpMatchReadinessBlocker_t;
 
@@ -429,6 +430,10 @@ struct mpMatchReadinessPolicy {
 	mpMatchBotPolicy_t	botPolicy;
 	bool				teamMode;
 	int					minimumActiveHumans;
+	// Bots count towards population independently of their ready-vote policy.
+	int					minimumActiveParticipants;
+	// Optional larger roster on at least one side (casual teamForcePresent=0).
+	int					minimumActiveOnAnySide;
 	// Applied independently to every side selected by requiredSideMask.  This
 	// keeps team-presence policy separate from captain/team-ready authority.
 	int					minimumActivePerRequiredSide;
@@ -436,6 +441,9 @@ struct mpMatchReadinessPolicy {
 	int					maximumActivePerSide;
 	uint32_t			requiredSideMask;
 	bool				requireDeclaredRosterSeats;
+	// The server's gametype may temporarily move active players between sides
+	// while their declared roster seats retain their between-round affiliation.
+	bool				allowRoundSideChanges;
 };
 
 struct mpMatchParticipantState {
@@ -568,7 +576,9 @@ public:
 	mpMatchMutationResult	SetParticipantActive( mpParticipantId participant, bool active,
 								uint64_t expectedRevision );
 	mpMatchMutationResult	SetParticipantSide( mpParticipantId participant, int side,
-								uint64_t expectedRevision );
+							uint64_t expectedRevision );
+	mpMatchMutationResult	SetParticipantRoundSide( mpParticipantId participant, int side,
+							uint64_t expectedRevision );
 	mpMatchMutationResult	SetParticipantReady( mpParticipantId participant, bool ready,
 								uint64_t expectedRevision );
 	mpMatchMutationResult	SetTeamReady( int side, bool ready, uint64_t expectedRevision );

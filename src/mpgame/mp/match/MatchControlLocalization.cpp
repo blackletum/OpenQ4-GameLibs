@@ -70,9 +70,9 @@ static_assert( MP_MATCH_RESULT_STATUS_COUNT == 4,
 	"Match operation result states require an explicit localization review" );
 static_assert( MP_MATCH_TEAM_COUNT == 4,
 	"Match teams require an explicit localization review" );
-static_assert( MP_MATCH_BLOCKER_COUNT == 11,
+static_assert( MP_MATCH_BLOCKER_COUNT == 12,
 	"Match readiness blockers require an explicit localization review" );
-static_assert( MP_RULE_FIELD_COUNT == 33,
+static_assert( MP_RULE_FIELD_COUNT == 34,
 	"Match rule fields require an explicit localization review" );
 static_assert( MP_MATCH_PROFILE_COUNT == 8,
 	"Match profiles require an explicit localization review" );
@@ -521,6 +521,7 @@ const char *MPMatchControlReadinessBlockerKey( mpMatchReadinessBlocker_t blocker
 		case MP_MATCH_BLOCKER_PARTICIPANT_NOT_READY: return "#str_42648";
 		case MP_MATCH_BLOCKER_TEAM_NOT_READY: return "#str_42649";
 		case MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_CONTESTANTS_PER_SIDE: return "#str_42650";
+		case MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_PARTICIPANTS: return "#str_42682";
 		case MP_MATCH_BLOCKER_COUNT: return UNKNOWN_KEY;
 		default: return UNKNOWN_KEY;
 	}
@@ -535,6 +536,7 @@ const char *MPMatchControlRuleFieldKey( unsigned char fieldId ) {
 		case MP_RULE_READY_THRESHOLD_BASIS_POINTS: return "#str_41608";
 		case MP_RULE_BOTS_CAN_READY: return "#str_41610";
 		case MP_RULE_MIN_ACTIVE_HUMANS: return "#str_41612";
+		case MP_RULE_MIN_ACTIVE_PLAYERS: return "#str_42680";
 		case MP_RULE_MIN_TEAM_SIZE: return "#str_41614";
 		case MP_RULE_REQUIRE_BOTH_TEAMS: return "#str_41616";
 		case MP_RULE_ROSTER_SIZE_PER_TEAM: return "#str_41618";

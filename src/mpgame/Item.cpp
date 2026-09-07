@@ -2228,6 +2228,7 @@ void rvItemCTFFlag::Spawn () {
 		}
 		case TEAM_MAX: {
 			powerup = POWERUP_CTF_ONEFLAG;
+			gameLocal.mpGame.SetFlagEntity( this, TEAM_MAX );
 			break;
 		}
 		default:

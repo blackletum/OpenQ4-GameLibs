@@ -138,6 +138,9 @@ typedef struct mpMatchRosterInvitation_s {
 	int side;
 	mpMatchRosterRole_t role;
 	mpParticipantId issuer;
+	// Only the trusted local-operator adapter may set this connection-scoped
+	// grant. Network roles are otherwise revalidated whenever the invite is used.
+	bool operatorAuthorized;
 	int rosterSeat;
 	mpMatchEngineTime issuedAt;
 	mpMatchEngineTime expiresAt;
@@ -270,12 +273,13 @@ public:
 		mpParticipantId target, int side, mpMatchRosterRole_t role,
 		mpParticipantId issuer, int lifetimeMsec, mpMatchEngineTime engineNow,
 		mpMatchTeamsRevision_t expectedRevision,
-		mpMatchRosterInvitationId_t &outInvitationId );
+		mpMatchRosterInvitationId_t &outInvitationId,
+		bool operatorAuthorized = false );
 	mpMatchTeamsMutationResult_t RevokeRosterInvitation( uint64_t requestedSessionId,
 		mpMatchRosterInvitationId_t invitationId, mpParticipantId requester,
 		bool authorityOverride, mpMatchEngineTime engineNow,
 		mpMatchTeamsRevision_t expectedRevision );
-	mpMatchTeamsMutationResult_t ExpireRosterInvitations( uint64_t requestedSessionId,
+	mpMatchTeamsMutationResult_t ExpireRosterInvitations( const mpMatchSession &session,
 		mpMatchEngineTime engineNow, mpMatchTeamsRevision_t expectedRevision );
 
 	// Removing a disconnected identity also revokes every authority-bearing
@@ -329,7 +333,8 @@ private:
 		mpMatchRosterRole_t role ) const;
 	void RemoveQueueAt( int index );
 	void RemoveInvitationAt( int index );
-	int RemoveExpiredInvitations( mpMatchEngineTime engineNow );
+	int RemoveExpiredInvitations( const mpMatchSession &session,
+		mpMatchEngineTime engineNow );
 	mpMatchTeamsJoinDecision_t EvaluateJoinInternal( const mpMatchSession &session,
 		mpParticipantId participant, int requestedSide,
 		mpMatchRosterInvitationId_t invitationId,

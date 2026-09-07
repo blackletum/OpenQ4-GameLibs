@@ -40,9 +40,17 @@ static bool IsTeamsLivePhase( mpGameState_t phase ) {
 }
 
 static bool TeamsIssuerIsCurrent( const mpMatchSession &session,
-		mpParticipantId issuer ) {
+		mpParticipantId issuer, int side, bool operatorAuthorized ) {
 	const mpMatchParticipantState *state = session.FindParticipant( issuer );
-	return state != NULL && state->connected && state->human;
+	if ( state == NULL || !state->connected || !state->human ) {
+		return false;
+	}
+	// Invitations delegate current roster authority. Benching or demoting a
+	// captain withdraws that delegation while the connection remains present.
+	return operatorAuthorized ||
+		( state->roles & MPMatchRoleBit( MP_MATCH_ROLE_REFEREE ) ) != 0 ||
+		( state->active && state->side == side &&
+			( state->roles & MPMatchRoleBit( MP_MATCH_ROLE_CAPTAIN ) ) != 0 );
 }
 
 static bool AddTeamsDuration( mpMatchEngineTime base, int durationMsec,
@@ -164,6 +172,7 @@ void mpMatchRosterInvitation_t::Clear( void ) {
 	side = MP_MATCH_SIDE_NONE;
 	role = MP_MATCH_ROSTER_PLAYER;
 	issuer = mpParticipantId::Invalid();
+	operatorAuthorized = false;
 	rosterSeat = -1;
 	issuedAt = mpMatchEngineTime::FromMilliseconds( 0 );
 	expiresAt = mpMatchEngineTime::FromMilliseconds( 0 );
@@ -759,10 +768,13 @@ void mpMatchTeams::RemoveInvitationAt( int index ) {
 	invitations[ invitationCount ].Clear();
 }
 
-int mpMatchTeams::RemoveExpiredInvitations( mpMatchEngineTime engineNow ) {
+int mpMatchTeams::RemoveExpiredInvitations( const mpMatchSession &session,
+		mpMatchEngineTime engineNow ) {
 	int removed = 0;
 	for ( int i = 0; i < invitationCount; ) {
-		if ( engineNow >= invitations[ i ].expiresAt ) {
+		if ( engineNow >= invitations[ i ].expiresAt ||
+			!TeamsIssuerIsCurrent( session, invitations[ i ].issuer,
+				invitations[ i ].side, invitations[ i ].operatorAuthorized ) ) {
 			RemoveInvitationAt( i );
 			++removed;
 		} else {
@@ -800,7 +812,8 @@ mpMatchTeamsMutationResult_t mpMatchTeams::IssueRosterInvitation(
 		mpMatchRosterRole_t role, mpParticipantId issuer, int lifetimeMsec,
 		mpMatchEngineTime engineNow,
 		mpMatchTeamsRevision_t expectedRevision,
-		mpMatchRosterInvitationId_t &outInvitationId ) {
+		mpMatchRosterInvitationId_t &outInvitationId,
+		bool operatorAuthorized ) {
 	outInvitationId = 0;
 	mpMatchTeamsReason_t reason;
 	if ( !CanMutate( session.GetSessionId(), expectedRevision, reason ) ||
@@ -832,6 +845,9 @@ mpMatchTeamsMutationResult_t mpMatchTeams::IssueRosterInvitation(
 		( !teamMode && side != MP_MATCH_SIDE_NONE ) ) {
 		return Rejected( MP_MATCH_TEAMS_REASON_INVALID_SIDE );
 	}
+	if ( !TeamsIssuerIsCurrent( session, issuer, side, operatorAuthorized ) ) {
+		return Rejected( MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
+	}
 	if ( session.FindRosterSeat( target ) >= 0 ) {
 		return Rejected( MP_MATCH_TEAMS_REASON_PARTICIPANT_ALREADY_ROSTERED );
 	}
@@ -858,7 +874,7 @@ mpMatchTeamsMutationResult_t mpMatchTeams::IssueRosterInvitation(
 	}
 
 	mpMatchTeams candidate = *this;
-	candidate.RemoveExpiredInvitations( engineNow );
+	candidate.RemoveExpiredInvitations( session, engineNow );
 	if ( candidate.invitationCount >= MP_MATCH_TEAMS_MAX_INVITATIONS ) {
 		return Rejected( MP_MATCH_TEAMS_REASON_INVITATION_CAPACITY );
 	}
@@ -875,6 +891,7 @@ mpMatchTeamsMutationResult_t mpMatchTeams::IssueRosterInvitation(
 	invitation.side = side;
 	invitation.role = role;
 	invitation.issuer = issuer;
+	invitation.operatorAuthorized = operatorAuthorized;
 	invitation.rosterSeat = rosterSeat;
 	invitation.issuedAt = engineNow;
 	invitation.expiresAt = expiresAt;
@@ -930,15 +947,16 @@ mpMatchTeamsMutationResult_t mpMatchTeams::RevokeRosterInvitation(
 }
 
 mpMatchTeamsMutationResult_t mpMatchTeams::ExpireRosterInvitations(
-		uint64_t requestedSessionId, mpMatchEngineTime engineNow,
+		const mpMatchSession &session, mpMatchEngineTime engineNow,
 		mpMatchTeamsRevision_t expectedRevision ) {
 	mpMatchTeamsReason_t reason;
-	if ( !CanMutate( requestedSessionId, expectedRevision, reason ) ||
+	if ( !CanMutate( session.GetSessionId(), expectedRevision, reason ) ||
+		!ValidateSession( session, NULL, reason ) ||
 		!ValidateTime( engineNow, reason ) ) {
 		return Rejected( reason );
 	}
 	mpMatchTeams candidate = *this;
-	if ( candidate.RemoveExpiredInvitations( engineNow ) == 0 ) {
+	if ( candidate.RemoveExpiredInvitations( session, engineNow ) == 0 ) {
 		return ObservedNoChange( engineNow, MP_MATCH_TEAMS_REASON_NONE );
 	}
 	candidate.lastEngineTime = engineNow;
@@ -1001,7 +1019,7 @@ mpMatchTeamsJoinDecision_t mpMatchTeams::EvaluateJoinInternal(
 		return DeniedJoin( reason );
 	}
 	const mpGameState_t phase = session.GetPhase();
-	if ( !IsTeamsLobbyPhase( phase ) &&
+	if ( phase != WARMUP &&
 		!( policy.allowLiveJoin && IsTeamsLivePhase( phase ) ) ) {
 		return DeniedJoin( MP_MATCH_TEAMS_REASON_WRONG_PHASE );
 	}
@@ -1032,7 +1050,8 @@ mpMatchTeamsJoinDecision_t mpMatchTeams::EvaluateJoinInternal(
 		if ( !invitation->IsActiveAt( engineNow ) ) {
 			return DeniedJoin( MP_MATCH_TEAMS_REASON_INVITATION_EXPIRED );
 		}
-		if ( !TeamsIssuerIsCurrent( session, invitation->issuer ) ) {
+		if ( !TeamsIssuerIsCurrent( session, invitation->issuer,
+			invitation->side, invitation->operatorAuthorized ) ) {
 			return DeniedJoin( MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
 		}
 		const mpMatchRosterSeat *reservedSeat =
@@ -1217,7 +1236,7 @@ mpMatchTeamsJoinDecision_t mpMatchTeams::PlanSubstitution(
 		return DeniedJoin( reason );
 	}
 	const mpGameState_t phase = session.GetPhase();
-	const bool administrativePhase = IsTeamsLobbyPhase( phase ) || phase == COUNTDOWN;
+	const bool administrativePhase = phase == WARMUP || phase == COUNTDOWN;
 	if ( !administrativePhase &&
 		!( policy.allowLiveSubstitution &&
 			( phase == GAMEON || phase == SUDDENDEATH ) ) ) {
@@ -1290,7 +1309,8 @@ mpMatchTeamsJoinDecision_t mpMatchTeams::PlanSubstitution(
 		if ( !invitation->IsActiveAt( engineNow ) ) {
 			return DeniedJoin( MP_MATCH_TEAMS_REASON_INVITATION_EXPIRED );
 		}
-		if ( !TeamsIssuerIsCurrent( session, invitation->issuer ) ) {
+		if ( !TeamsIssuerIsCurrent( session, invitation->issuer,
+			invitation->side, invitation->operatorAuthorized ) ) {
 			return DeniedJoin( MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
 		}
 	} else if ( policy.requireInvitationForSubstitution && !persistentBench ) {
@@ -1495,7 +1515,8 @@ bool mpMatchTeams::BuildRecipientSnapshot( const mpMatchSession &session,
 		for ( int i = 0; i < invitationCount; ++i ) {
 			if ( invitations[ i ].target == recipient &&
 				invitations[ i ].IsActiveAt( engineNow ) &&
-				TeamsIssuerIsCurrent( session, invitations[ i ].issuer ) ) {
+				TeamsIssuerIsCurrent( session, invitations[ i ].issuer,
+					invitations[ i ].side, invitations[ i ].operatorAuthorized ) ) {
 				if ( out.invitationCount >= MP_MATCH_TEAMS_MAX_INVITATIONS ) {
 					out.Clear();
 					return false;

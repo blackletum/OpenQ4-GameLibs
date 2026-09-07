@@ -77,7 +77,7 @@ def main() -> None:
         "context.ruleGameType != GAME_DUEL",
         "series.GetConfiguration().gameType != GAME_DUEL",
         "phase == WARMUP || phase == NEXTGAME",
-        "phase != GAMEREVIEW || series.GetState() != MP_SERIES_MAP_COMPLETE",
+        "phase != GAMEREVIEW && !recoveredReview",
         "candidate.GetState() == MP_SERIES_READY",
         "candidate.GetState() != MP_SERIES_COMPLETE",
     ):

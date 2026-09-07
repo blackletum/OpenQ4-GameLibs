@@ -254,7 +254,7 @@ const int MP_TEAM_MAXSCORE = 30000;
 
 const int MAX_AP = 5;
 
-const int CHAT_HISTORY_SIZE = 2048;
+const int CHAT_HISTORY_SIZE = 32768;
 const int RCON_HISTORY_SIZE = 4096;
 
 const int KILL_NOTIFICATION_LEN = 256;
@@ -416,6 +416,7 @@ public:
 						mpMatchTransitionReason_t reason, mpParticipantId authorizer,
 						int forfeitingSide );
 	bool			CommitMatchRoundTransition( roundState_t newState );
+	bool			ApplyRoundTeamAssignment( idPlayer *player, int team, bool respawn );
 	bool			BeginMatchOvertimePeriod( void );
 	void			ServerReceiveMatchOperation( int clientNum, const idBitMsg &msg );
 	void			ClientReceiveMatchOperationResult( const idBitMsg &msg );
@@ -460,6 +461,12 @@ public:
 	// authoritative ready state, set from the client's reliable ready message
 	void			ServerSetPlayerReady( int clientNum, bool ready );
 	bool			IsManagedMatch( void ) const;
+	bool			RotateManagedDuelQueue( int firstSlot, int secondSlot, int losingSlot );
+	void			RecordManagedDuelResult( mpMatchTransitionReason_t reason,
+						int forfeitingSide, mpParticipantId authorizer );
+	bool			ResolveManagedDuelForfeitParticipants( int forfeitingSide,
+						mpParticipantId authorizer, mpParticipantId &forfeiter,
+						mpParticipantId &winner ) const;
 	// Legacy server administration is intentionally unavailable while the
 	// revisioned Match Control authority owns the session.  Command and GUI
 	// adapters call this before touching cvars, maps, teams, or clients.
@@ -649,6 +656,7 @@ public:
 
 	void			EnterGame( int clientNum );
 	bool			CanPlay( idPlayer *p );
+	bool			IsRankedParticipant( idPlayer *player );
 	bool			IsInGame( int clientNum );
 	bool			WantRespawn( idPlayer *p );
 
@@ -670,6 +678,7 @@ public:
 	void			SetHudOverlay( idUserInterface* overlay, int duration );
 
 	void			ClearMap ( void );
+	void			PrepareForMapShutdown( void );
 
 	void			EnableDamage( bool enable = true );
 
@@ -883,6 +892,8 @@ private:
 	mpMatchItemTimingRegistry matchItemTiming;
 	mpSessionView	clientMatchView;
 	bool			clientMatchViewValid;
+	mpMatchProtocolSessionId_t clientSummaryAnnouncedSession;
+	mpMatchProtocolRevision_t clientSummaryAnnouncedResult;
 	mpMatchControlModel clientMatchControlModel;
 	mpMatchControlError_t clientMatchControlError;
 	bool			clientMatchControlErrorValid;
@@ -938,6 +949,9 @@ private:
 	char			matchMVDQPath[ MP_MATCH_EVIDENCE_STORAGE_QPATH_BYTES + 1 ];
 	uint64_t		matchPhaseEffectsSessionId;
 	uint64_t		matchPhaseEffectsRevision;
+	uint64_t		matchTerminalResultSessionId;
+	mpMatchViewTerminalResult_t matchTerminalResult;
+	mpEvidenceMapResult matchTerminalEvidenceResult;
 
 	bool			InitializeCompetitiveRules( void );
 	bool			CanEnterMatchCountdown( void ) const;
@@ -1002,11 +1016,15 @@ private:
 						mpParticipantId participant );
 	void			RecordMatchEvidenceResult( mpMatchTransitionReason_t reason,
 						mpParticipantId authorizer, int forfeitingSide = MP_MATCH_SIDE_NONE );
+	mpEvidenceMapResult BuildMatchTerminalEvidenceResult( mpMatchTransitionReason_t reason,
+						mpParticipantId authorizer, int forfeitingSide );
+	void			ClearMatchTerminalResult( void );
+	void			FreezeMatchTerminalResult( const mpEvidenceMapResult &result );
 	bool			PersistMatchEvidence(
 						mpEvidenceStorageResult *storageResult = NULL );
 	bool			FinalizeMatchEvidence( bool abortedIfUndecided );
 	void			ProjectMatchMVDReportArtifact(
-						mpSeriesReportArtifactInput &artifact ) const;
+						mpSeriesReportArtifactInput &artifact, idStr &qpathStorage ) const;
 	bool			ReconcileCompetitionSeriesMVDResults(
 						mpCompetitionSeriesReport &report, bool sealing );
 	void			StartMatchMVDIfRequired( void );
@@ -1053,10 +1071,12 @@ private:
 	bool			VoteRateLimitAccepted( int clientNum );
 	void			StampVoteRateLimit( int clientNum );
 	void			ResetVoteCooldownSlot( int clientNum );
+	bool			HasRecoveredCompetitionReview( void ) const;
 	void			BuildMatchOperationContext( int clientNum,
 						mpMatchOperationOpcode_t opcode, bool enforceTransportCooldown,
 						mpOperationAdapterContext_t &context );
 	void			ProcessPassedMatchProposals( void );
+	void			RetireUnpassedMatchProposals( void );
 	bool			ApplyMatchOperationContinuation( int clientNum,
 						const mpMatchOperationRequest_t &request,
 						mpOperationExecutionResult_t &execution );
@@ -1243,6 +1263,7 @@ private:
 	bool			pureReady;				// defaults to false, set to true once server game is running with pure checksums
 	bool			currentSoundOverride;
 	int				switchThrottle[ 3 ];
+	static void		SendReady( bool isReady );
 	int				voiceChatThrottle;
 
 	void			SetupBuyMenuItems();
@@ -1253,7 +1274,7 @@ private:
 	// player who's rank info we're displaying
 	idEntityPtr<idPlayer>		rankTextPlayer;
 
-	idEntityPtr<idEntity>		flagEntities[ TEAM_MAX ];	
+	idEntityPtr<idEntity>		flagEntities[ MAX_CTF_FLAGS ];
 	idEntityPtr<idPlayer>		flagCarriers[ TEAM_MAX ];
 
 	// updates the passed gui with current score information
@@ -1268,8 +1289,10 @@ private:
 	void			UpdateDMScoreboard( idUserInterface *scoreBoard );
 	void			UpdateTeamScoreboard( idUserInterface *scoreBoard );
 	void			UpdateSummaryBoard( idUserInterface *scoreBoard );
+	bool			UpdateManagedSummaryResult( idUserInterface *gui, bool announce );
 
 	int				GetPlayerRank( idPlayer* player, bool& isTied );
+	idPlayer*		GetRankLeader( void );
 	char*			GetPlayerRankText( idPlayer* player );
 	char*			GetPlayerRankText( int rank, bool tied, int score );
 
@@ -1418,7 +1441,7 @@ ID_INLINE void idMultiplayerGame::ResetRconGuiStatus( void ) {
 
 // asalmon: needed access team scores for rich presence
 ID_INLINE int idMultiplayerGame::GetScoreForTeam( int i ) {
-	if( i < 0 || i > TEAM_MAX ) {
+	if( i < 0 || i >= TEAM_MAX ) {
 		return 0;
 	}
 	return teamScore[ i ];

@@ -426,8 +426,7 @@ void rvRoundGameState::ResetRound( void ) {
 	gameLocal.LocalMapRestart();
 
 	outMsg.Init( msgBuf, sizeof( msgBuf ) );
-	outMsg.WriteByte( GAME_RELIABLE_MESSAGE_RESTART );
-	outMsg.WriteBits( 0, 1 );
+	outMsg.WriteByte( GAME_RELIABLE_MESSAGE_ROUNDRESTART );
 	networkSystem->ServerSendReliableMessage( -1, outMsg );
 
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {

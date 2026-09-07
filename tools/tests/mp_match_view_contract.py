@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -69,9 +70,9 @@ def struct_body(header: str, tag: str) -> str:
 
 def schema_contract(header: str, source: str) -> None:
     for token in (
-        "MP_MATCH_VIEW_SCHEMA_VERSION = 3",
-        "MP_MATCH_VIEW_MAX_MESSAGE_BYTES = 7680",
-        "MP_MATCH_VIEW_MAX_TOP_LEVEL_FIELDS = 25",
+        "MP_MATCH_VIEW_SCHEMA_VERSION = 4",
+        "MP_MATCH_VIEW_MAX_MESSAGE_BYTES = 7936",
+        "MP_MATCH_VIEW_MAX_TOP_LEVEL_FIELDS = 26",
         "MP_MATCH_VIEW_MAX_PARTICIPANTS = 32",
         "MP_MATCH_VIEW_MAX_ROSTER_SEATS = 32",
         "MP_MATCH_VIEW_MAX_RULE_FIELDS = 64",
@@ -96,11 +97,11 @@ def schema_contract(header: str, source: str) -> None:
         "competitionSide",
         "seriesId",
     ):
-        require(header, token, "bounded version-3 view schema")
+        require(header, token, "bounded version-4 view schema")
 
     field_block = re.search(
         r"typedef enum \{(?P<body>\s*MP_MATCH_VIEW_FIELD_SCHEMA.*?"
-        r"MP_MATCH_VIEW_FIELD_EVIDENCE\s*=\s*24\s*)\}\s*mpMatchViewField_t;",
+        r"MP_MATCH_VIEW_FIELD_TERMINAL_RESULT\s*=\s*25\s*)\}\s*mpMatchViewField_t;",
         source,
         re.DOTALL,
     )
@@ -109,9 +110,9 @@ def schema_contract(header: str, source: str) -> None:
     assignments = re.findall(
         r"MP_MATCH_VIEW_FIELD_[A-Z_]+\s*=\s*(\d+)", field_block.group("body")
     )
-    if [int(value) for value in assignments] != list(range(1, 25)):
-        raise AssertionError(f"required view fields are not append-only 1..24: {assignments}")
-    require(source, "MP_MATCH_VIEW_REQUIRED_FIELD_COUNT = 24", "required field count")
+    if [int(value) for value in assignments] != list(range(1, 26)):
+        raise AssertionError(f"required view fields are not append-only 1..25: {assignments}")
+    require(source, "MP_MATCH_VIEW_REQUIRED_FIELD_COUNT = 25", "required field count")
     require(source, "static_assert( MP_MATCH_OP_COUNT <= 64", "operation mask ceiling")
     require(source, "static_cast<mpMatchProtocolSessionId_t>( sessionHigh ) << 32",
             "full-width session decode")
@@ -261,7 +262,7 @@ def codec_contract(header: str, source: str) -> None:
     require_before(decode, "DecodePayload", "view = decoded", "decode then publish")
     require_before(decode, "MPMatchViewValidate( decoded", "view = decoded",
                    "validate then publish")
-    require(source, "fieldId <= MP_MATCH_VIEW_FIELD_EVIDENCE",
+    require(source, "fieldId <= MP_MATCH_VIEW_FIELD_TERMINAL_RESULT",
             "closed required-field range")
     require(source, "!known && ( rawTag & MP_MATCH_VIEW_OPTIONAL_EXTENSION_BIT ) == 0",
             "unknown required fields fail closed")
@@ -305,6 +306,7 @@ HARNESS = r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <initializer_list>
 
 typedef unsigned char byte;
 
@@ -660,10 +662,58 @@ static mpSessionView MaxView() {
     evidence.recentEventKinds[1] = MP_MATCH_VIEW_EVIDENCE_EVENT_ROSTER_CHANGE;
     evidence.recentEventKinds[2] = MP_MATCH_VIEW_EVIDENCE_EVENT_MAP_RESULT;
     evidence.recentEventKinds[3] = MP_MATCH_VIEW_EVIDENCE_EVENT_OUTPUT_FAILURE;
+    view.publicState.lifecycle.Clear();
+    view.publicState.lifecycle.phase = GAMEREVIEW;
+    auto &terminal = view.publicState.terminalResult;
+    terminal.outcome = MP_MATCH_VIEW_RESULT_FORFEIT;
+    terminal.reason = MP_MATCH_VIEW_RESULT_REASON_FORFEIT;
+    terminal.resultRevision = view.publicState.sessionRevision;
+    terminal.winnerParticipantId = 0xffffffffu;
+    char maximumName[MP_MATCH_VIEW_RESULT_NAME_BYTES + 1];
+    memset(maximumName, 'W', sizeof(maximumName)-1); maximumName[sizeof(maximumName)-1] = 0;
+    MPMatchViewSetResultWinnerName(terminal, maximumName);
     return view;
 }
 
+#include "mpgame/mp/match/MatchSeries.h"
+
+static void ProjectLiveSeriesSelection(const mpSeriesSelectedMap *selection,
+        int selectionIndex, mpMatchViewSeriesMap_t &map) {
+    // Compiled from the live adapter, rather than a second projection.
+    @LIVE_SERIES_SELECTION@
+}
+
+static int LiveSeriesSelectionContract() {
+    for (int side = 0; side < 2; ++side) {
+        for (int decider = 0; decider < 2; ++decider) {
+            for (int startingSide = -1; startingSide < 2; ++startingSide) {
+                mpSeriesSelectedMap selection = {};
+                selection.selectedBySide = side;
+                selection.decider = decider != 0;
+                selection.hasStartingGameSide = startingSide >= 0;
+                selection.startingGameSide = startingSide;
+                selection.gameSideChosenBy = 1 - side;
+                mpMatchViewSeriesMap_t map; map.Clear();
+                map.poolIndex = 0;
+                map.disposition = MP_MATCH_VIEW_MAP_SELECTED;
+                CHECK(map.SetMapToken("mp/q4dm1"));
+                ProjectLiveSeriesSelection(&selection, 0, map);
+                mpMatchViewError_t error; error.Clear();
+                CHECK(ValidateSeriesMap(map, 0, 1, &error));
+                CHECK(selection.selectedBySide == side);
+                CHECK(map.selectedBySide == (decider ? MP_MATCH_VIEW_SIDE_NONE : side));
+                if (decider) {
+                    map.selectedBySide = side;
+                    CHECK(!ValidateSeriesMap(map, 0, 1, &error));
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 int main() {
+    CHECK(LiveSeriesSelectionContract() == 0);
     mpSessionView base = BaseView();
     mpMatchViewError_t error;
     CHECK(MPMatchViewValidate(base, &error));
@@ -890,7 +940,7 @@ int main() {
     CHECK(error.reason == MP_MATCH_VIEW_ERROR_DUPLICATE_FIELD);
 
     memcpy(malformed, encoded, encodedSize);
-    malformed[encodedSize + 0] = 0x80 | 25;
+    malformed[encodedSize + 0] = 0x80 | 26;
     malformed[encodedSize + 1] = 1;
     malformed[encodedSize + 2] = 0;
     malformed[encodedSize + 3] = 0x5a;
@@ -903,7 +953,7 @@ int main() {
     extension.SetSize(encodedSize + 4);
     extension.BeginReading();
     CHECK(MPMatchViewDecode(extension, sentinel, &error));
-    malformed[encodedSize] = 25;
+    malformed[encodedSize] = 26;
     idBitMsg requiredUnknown;
     requiredUnknown.Init(malformed, encodedSize + 4);
     requiredUnknown.SetSize(encodedSize + 4);
@@ -1019,6 +1069,113 @@ int main() {
 '''
 
 
+TERMINAL_CASES = r'''
+static int TerminalResultContract() {
+    mpSessionView view = BaseView();
+    view.publicState.lifecycle.phase = GAMEREVIEW;
+    auto &result = view.publicState.terminalResult;
+    result.outcome = MP_MATCH_VIEW_RESULT_FORFEIT;
+    result.reason = MP_MATCH_VIEW_RESULT_REASON_FORFEIT;
+    result.resultRevision = 3;
+    result.winnerParticipantId = 0xffffffffu; // A departed identity need not be in current roster.
+    MPMatchViewSetResultWinnerName(result, "Frozen \xE2\x98\x83 winner");
+    mpMatchViewError_t error;
+    CHECK(MPMatchViewValidate(view, &error));
+    byte encoded[MP_MATCH_VIEW_MAX_MESSAGE_BYTES + 32]; int size = 0;
+    CHECK(Encoded(view, encoded, sizeof(encoded), size));
+    const int terminalData = FindFieldData(encoded, size, 25);
+    CHECK(terminalData > 0);
+    idBitMsg message; message.Init(encoded, size); message.SetSize(size); message.BeginReading();
+    mpSessionView decoded; decoded.Clear();
+    CHECK(MPMatchViewDecode(message, decoded, &error));
+    CHECK(decoded.publicState.terminalResult.winnerParticipantId == 0xffffffffu);
+    CHECK(strcmp(decoded.publicState.terminalResult.winnerName, result.winnerName) == 0);
+    for (auto phase : {WARMUP, NEXTGAME, GAMEREVIEW, COUNTDOWN, GAMEON, SUDDENDEATH, INACTIVE}) {
+        mpSessionView candidate = view; candidate.publicState.lifecycle.Clear();
+        candidate.publicState.lifecycle.phase = phase;
+        CHECK(MPMatchViewValidate(candidate, &error) ==
+            (phase == WARMUP || phase == NEXTGAME || phase == GAMEREVIEW));
+    }
+    for (int scenario = 0; scenario < 8; ++scenario) {
+        mpSessionView candidate = view;
+        auto &bad = candidate.publicState.terminalResult;
+        switch (scenario) {
+            case 0: bad.resultRevision = 0; break;
+            case 1: bad.resultRevision = candidate.publicState.sessionRevision + 1; break;
+            case 2: bad.winnerSide = 1; break; // Team and individual winners cannot coexist.
+            case 3: bad.winnerParticipantId = 0; break;
+            case 4: bad.winnerNameLength = 0; break;
+            case 5: bad.winnerName[bad.winnerNameLength + 1] = 'x'; break;
+            case 6: bad.reason = MP_MATCH_VIEW_RESULT_REASON_LIMIT_REACHED; break;
+            case 7: bad.outcome = MP_MATCH_VIEW_RESULT_NONE; break;
+        }
+        CHECK(!MPMatchViewValidate(candidate, &error));
+        CHECK(error.fieldId == 25);
+    }
+    for (auto outcome : {MP_MATCH_VIEW_RESULT_NONE, MP_MATCH_VIEW_RESULT_DECIDED,
+            MP_MATCH_VIEW_RESULT_FORFEIT, MP_MATCH_VIEW_RESULT_DRAW, MP_MATCH_VIEW_RESULT_ABORTED}) {
+        mpSessionView candidate = view;
+        auto &valid = candidate.publicState.terminalResult; valid.Clear(); valid.outcome = outcome;
+        if (outcome != MP_MATCH_VIEW_RESULT_NONE) valid.resultRevision = 3;
+        valid.reason = outcome == MP_MATCH_VIEW_RESULT_NONE ? MP_MATCH_VIEW_RESULT_REASON_NONE :
+            outcome == MP_MATCH_VIEW_RESULT_FORFEIT ? MP_MATCH_VIEW_RESULT_REASON_FORFEIT :
+            outcome == MP_MATCH_VIEW_RESULT_ABORTED ? MP_MATCH_VIEW_RESULT_REASON_MATCH_ABORTED :
+            MP_MATCH_VIEW_RESULT_REASON_LIMIT_REACHED;
+        if (outcome == MP_MATCH_VIEW_RESULT_DECIDED || outcome == MP_MATCH_VIEW_RESULT_FORFEIT) valid.winnerSide = 1;
+        CHECK(MPMatchViewValidate(candidate, &error));
+        if (outcome == MP_MATCH_VIEW_RESULT_ABORTED || outcome == MP_MATCH_VIEW_RESULT_DRAW) {
+            valid.winnerSide = 0; CHECK(!MPMatchViewValidate(candidate, &error));
+        }
+    }
+    for (int scenario = 0; scenario < 6; ++scenario) {
+        byte corrupt[MP_MATCH_VIEW_MAX_MESSAGE_BYTES + 32]; memcpy(corrupt, encoded, size);
+        switch (scenario) {
+            case 0: corrupt[terminalData] = 255; break;
+            case 1: corrupt[terminalData + 1] = 255; break;
+            case 2: corrupt[terminalData + 10] = 2; break;
+            case 3: corrupt[terminalData + 15] = 65; break;
+            case 4: corrupt[terminalData + 16] = 0xc0; break; // Overlong UTF-8.
+            case 5: corrupt[terminalData + 16] = 0; break; // Embedded NUL.
+        }
+        idBitMsg bad; bad.Init(corrupt, size); bad.SetSize(size); bad.BeginReading();
+        int before, beforeBit, after, afterBit; bad.SaveReadState(before, beforeBit);
+        mpSessionView sentinel = view; sentinel.publicState.viewRevision = 9000;
+        CHECK(!MPMatchViewDecode(bad, sentinel, &error));
+        bad.SaveReadState(after, afterBit);
+        CHECK(before == after && beforeBit == afterBit && sentinel.publicState.viewRevision == 9000);
+    }
+    for (const char *untrusted : {"", "\n\r\t\x7f", "\xc0\x80", "\xed\xa0\x80",
+            "\xf4\x90\x80\x80", "\xe2\x80\xae", "Good \xe2\x98\x83"}) {
+        mpSessionView candidate = view;
+        MPMatchViewSetResultWinnerName(candidate.publicState.terminalResult, untrusted);
+        CHECK(MPMatchViewValidate(candidate, &error));
+    }
+    char boundary[68]; memset(boundary, 'a', 63); memcpy(boundary + 63, "\xe2\x98\x83", 4);
+    MPMatchViewSetResultWinnerName(result, boundary); CHECK(result.winnerNameLength == 63);
+    CHECK(MPMatchViewValidate(view, &error));
+    MPMatchViewSetResultWinnerName(result, nullptr);
+    CHECK(strcmp(result.winnerName, "player-4294967295") == 0);
+    mpSessionView current = view, incoming = view;
+    incoming.publicState.viewRevision++;
+    MPMatchViewSetResultWinnerName(incoming.publicState.terminalResult, "Tampered winner");
+    CHECK(MPMatchViewAccept(current, incoming, &error) == MP_MATCH_VIEW_ACCEPT_REJECTED_INVALID);
+    CHECK(current.publicState.viewRevision == view.publicState.viewRevision);
+    incoming = view; incoming.publicState.viewRevision++;
+    incoming.publicState.terminalResult.resultRevision--;
+    CHECK(MPMatchViewAccept(current, incoming, &error) == MP_MATCH_VIEW_ACCEPT_REJECTED_STALE);
+    incoming = view; incoming.publicState.viewRevision++; incoming.publicState.lifecycle.phase = WARMUP;
+    CHECK(MPMatchViewAccept(current, incoming, &error) == MP_MATCH_VIEW_ACCEPT_ADVANCED);
+    incoming.publicState.viewRevision++; incoming.publicState.terminalResult.Clear();
+    incoming.publicState.lifecycle.phase = COUNTDOWN;
+    CHECK(MPMatchViewAccept(current, incoming, &error) == MP_MATCH_VIEW_ACCEPT_ADVANCED);
+    CHECK(current.publicState.terminalResult.outcome == MP_MATCH_VIEW_RESULT_NONE);
+    incoming = view; incoming.publicState.sessionId++;
+    CHECK(MPMatchViewAccept(current, incoming, &error) == MP_MATCH_VIEW_ACCEPT_REPLACED_SESSION);
+    return 0;
+}
+'''
+
+
 def executable_contract() -> None:
     compiler = next(
         (path for name in ("clang++", "g++", "c++") if (path := shutil.which(name))),
@@ -1033,10 +1190,17 @@ def executable_contract() -> None:
         temp_dir = Path(temp)
         harness = temp_dir / "match_view_contract.cpp"
         executable = temp_dir / "match_view_contract.exe"
-        harness.write_text(HARNESS, encoding="utf-8")
+        live = read(ROOT / "src/mpgame/MultiplayerGame.cpp")
+        start = live.index("map.selectedBySide = selection->")
+        end = live.index("break;", start)
+        executable_source = HARNESS.replace("@LIVE_SERIES_SELECTION@", live[start:end])
+        executable_source = executable_source.replace("int main() {", TERMINAL_CASES +
+            "\nint main() {\n    CHECK(TerminalResultContract() == 0);", 1)
+        harness.write_text(executable_source, encoding="utf-8")
         compiled = subprocess.run(
             [
                 compiler,
+                *(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if os.environ.get("MP_MATCH_TEST_SANITIZERS") == "1" else []),
                 "-std=c++17",
                 "-Wall",
                 "-Wextra",

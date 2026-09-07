@@ -371,11 +371,14 @@ mpMatchReadinessPolicy::mpMatchReadinessPolicy( void ) :
 	botPolicy( MP_MATCH_BOTS_EXCLUDED ),
 	teamMode( false ),
 	minimumActiveHumans( 0 ),
+	minimumActiveParticipants( 0 ),
+	minimumActiveOnAnySide( 0 ),
 	minimumActivePerRequiredSide( 0 ),
 	readyThresholdBasisPoints( 10000 ),
 	maximumActivePerSide( 0 ),
 	requiredSideMask( 0 ),
-	requireDeclaredRosterSeats( false ) {
+	requireDeclaredRosterSeats( false ),
+	allowRoundSideChanges( false ) {
 }
 
 bool mpMatchReadinessView::IsReady( void ) const {
@@ -437,11 +440,14 @@ bool mpMatchSession::Reset( uint64_t newSessionId, mpMatchEngineTime initialEngi
 	readinessPolicy.botPolicy = MP_MATCH_BOTS_EXCLUDED;
 	readinessPolicy.teamMode = false;
 	readinessPolicy.minimumActiveHumans = 0;
+	readinessPolicy.minimumActiveParticipants = 0;
+	readinessPolicy.minimumActiveOnAnySide = 0;
 	readinessPolicy.minimumActivePerRequiredSide = 0;
 	readinessPolicy.readyThresholdBasisPoints = 10000;
 	readinessPolicy.maximumActivePerSide = 0;
 	readinessPolicy.requiredSideMask = 0;
 	readinessPolicy.requireDeclaredRosterSeats = false;
+	readinessPolicy.allowRoundSideChanges = false;
 	externalReadinessBlockers = 0;
 	ClearTeamReady();
 	lastForcedReadinessBlockers = 0;
@@ -1386,6 +1392,44 @@ mpMatchMutationResult mpMatchSession::SetParticipantSide( mpParticipantId partic
 	return Applied( previousRevision );
 }
 
+// Trusted game-mode mutation, separate from admission and voluntary team moves.
+// The caller must derive allowRoundSideChanges from the committed gametype.
+// Roster seats remain stable so a conversion cannot steal an opponent's seat
+// or bypass a lock to admit a spectator, substitute or replacement connection.
+mpMatchMutationResult mpMatchSession::SetParticipantRoundSide( mpParticipantId participant,
+		int side, uint64_t expectedRevision ) {
+	if ( !IsExpectedRevision( expectedRevision ) ) {
+		return Rejected( MP_MATCH_REASON_STALE_REVISION );
+	}
+	if ( !CanCommit() ) {
+		return Rejected( MP_MATCH_REASON_REVISION_EXHAUSTED );
+	}
+	if ( !readinessPolicy.allowRoundSideChanges || !readinessPolicy.teamMode ||
+		!IsLivePhase() || pause.state != MP_MATCH_PAUSE_RUNNING ||
+		( roundState != RS_ACTIVE && roundState != RS_COUNTDOWN ) ) {
+		return Rejected( MP_MATCH_REASON_WRONG_PHASE );
+	}
+	if ( !IsValidSide( side ) ) {
+		return Rejected( MP_MATCH_REASON_INVALID_SIDE );
+	}
+	const int index = FindParticipantIndex( participant );
+	if ( index < 0 ) {
+		return Rejected( MP_MATCH_REASON_PARTICIPANT_UNKNOWN );
+	}
+	if ( !participants[ index ].active || !IsValidSide( participants[ index ].side ) ||
+		( participants[ index ].roles & MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ) ) == 0 ) {
+		return Rejected( MP_MATCH_REASON_INVALID_ROLE );
+	}
+	if ( participants[ index ].side == side ) {
+		return NoChange( MP_MATCH_REASON_NONE );
+	}
+	const uint64_t previousRevision = sessionRevision;
+	participants[ index ].side = side;
+	participants[ index ].ready = false;
+	ClearTeamReady();
+	return Applied( previousRevision );
+}
+
 mpMatchMutationResult mpMatchSession::SetParticipantReady( mpParticipantId participant,
 		bool ready, uint64_t expectedRevision ) {
 	if ( !IsExpectedRevision( expectedRevision ) ) {
@@ -1484,6 +1528,10 @@ mpMatchMutationResult mpMatchSession::ConfigureReadiness(
 		newPolicy.botPolicy >= MP_MATCH_BOT_POLICY_COUNT ||
 		newPolicy.minimumActiveHumans < 0 ||
 		newPolicy.minimumActiveHumans > MP_MATCH_MAX_PARTICIPANTS ||
+		newPolicy.minimumActiveParticipants < 0 ||
+		newPolicy.minimumActiveParticipants > MP_MATCH_MAX_PARTICIPANTS ||
+		newPolicy.minimumActiveOnAnySide < 0 ||
+		newPolicy.minimumActiveOnAnySide > MP_MATCH_MAX_PARTICIPANTS ||
 		newPolicy.minimumActivePerRequiredSide < 0 ||
 		newPolicy.minimumActivePerRequiredSide > MP_MATCH_MAX_PARTICIPANTS ||
 		newPolicy.readyThresholdBasisPoints > 10000 ||
@@ -1494,7 +1542,16 @@ mpMatchMutationResult mpMatchSession::ConfigureReadiness(
 	}
 	const bool usesTeamReady = newPolicy.policy == MP_MATCH_READY_TEAM ||
 		newPolicy.policy == MP_MATCH_READY_INDIVIDUAL_AND_TEAM;
-	if ( !newPolicy.teamMode && ( usesTeamReady || newPolicy.maximumActivePerSide != 0 ||
+	if ( !newPolicy.allowRoundSideChanges ) {
+		for ( int seat = 0; seat < MP_MATCH_MAX_ROSTER_SEATS; ++seat ) {
+			const mpMatchParticipantState *occupant = FindParticipant( roster[ seat ].occupant );
+			if ( roster[ seat ].declared && occupant != NULL && occupant->side != roster[ seat ].side ) {
+				return Rejected( MP_MATCH_REASON_INVALID_SIDE );
+			}
+		}
+	}
+	if ( !newPolicy.teamMode && ( usesTeamReady || newPolicy.allowRoundSideChanges || newPolicy.maximumActivePerSide != 0 ||
+		newPolicy.minimumActiveOnAnySide != 0 ||
 		newPolicy.minimumActivePerRequiredSide != 0 || newPolicy.requiredSideMask != 0 ) ) {
 		return Rejected( MP_MATCH_REASON_INVALID_ARGUMENT );
 	}
@@ -1506,8 +1563,8 @@ mpMatchMutationResult mpMatchSession::ConfigureReadiness(
 		return Rejected( MP_MATCH_REASON_INVALID_ARGUMENT );
 	}
 	if ( newPolicy.maximumActivePerSide > 0 &&
-		newPolicy.minimumActivePerRequiredSide >
-			newPolicy.maximumActivePerSide ) {
+		( newPolicy.minimumActivePerRequiredSide > newPolicy.maximumActivePerSide ||
+			newPolicy.minimumActiveOnAnySide > newPolicy.maximumActivePerSide ) ) {
 		return Rejected( MP_MATCH_REASON_INVALID_ARGUMENT );
 	}
 	int requiredSideCount = 0;
@@ -1535,12 +1592,15 @@ mpMatchMutationResult mpMatchSession::ConfigureReadiness(
 		readinessPolicy.botPolicy == newPolicy.botPolicy &&
 		readinessPolicy.teamMode == newPolicy.teamMode &&
 		readinessPolicy.minimumActiveHumans == newPolicy.minimumActiveHumans &&
+		readinessPolicy.minimumActiveParticipants == newPolicy.minimumActiveParticipants &&
+		readinessPolicy.minimumActiveOnAnySide == newPolicy.minimumActiveOnAnySide &&
 		readinessPolicy.minimumActivePerRequiredSide ==
 			newPolicy.minimumActivePerRequiredSide &&
 		readinessPolicy.readyThresholdBasisPoints == newPolicy.readyThresholdBasisPoints &&
 		readinessPolicy.maximumActivePerSide == newPolicy.maximumActivePerSide &&
 		readinessPolicy.requiredSideMask == newPolicy.requiredSideMask &&
-		readinessPolicy.requireDeclaredRosterSeats == newPolicy.requireDeclaredRosterSeats ) {
+		readinessPolicy.requireDeclaredRosterSeats == newPolicy.requireDeclaredRosterSeats &&
+		readinessPolicy.allowRoundSideChanges == newPolicy.allowRoundSideChanges ) {
 		return NoChange( MP_MATCH_REASON_NONE );
 	}
 
@@ -1671,6 +1731,20 @@ mpMatchReadinessView mpMatchSession::EvaluateReadiness( void ) const {
 
 	if ( result.activeHumans < readinessPolicy.minimumActiveHumans ) {
 		result.blockers |= MPMatchReadinessBlockerBit( MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_HUMANS );
+	}
+	if ( result.activeParticipants < readinessPolicy.minimumActiveParticipants ) {
+		result.blockers |= MPMatchReadinessBlockerBit( MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_PARTICIPANTS );
+	}
+	if ( readinessPolicy.teamMode && readinessPolicy.minimumActiveOnAnySide > 0 ) {
+		bool enoughOnOneSide = false;
+		for ( int side = 0; side < MP_MATCH_SIDE_COUNT; ++side ) {
+			enoughOnOneSide |= result.activePerSide[ side ] >= readinessPolicy.minimumActiveOnAnySide;
+		}
+		if ( !enoughOnOneSide ) {
+			result.insufficientActiveSideMask = ( 1u << MP_MATCH_SIDE_COUNT ) - 1;
+			result.blockers |= MPMatchReadinessBlockerBit(
+				MP_MATCH_BLOCKER_INSUFFICIENT_ACTIVE_CONTESTANTS_PER_SIDE );
+		}
 	}
 	if ( readinessPolicy.teamMode &&
 		readinessPolicy.minimumActivePerRequiredSide > 0 ) {
@@ -2297,7 +2371,8 @@ bool mpMatchSession::ValidateInvariants( void ) const {
 				return false;
 			}
 			const mpMatchParticipantState &occupant = participants[ occupantIndex ];
-			if ( occupant.side != entry.side || occupant.active !=
+			if ( ( occupant.side != entry.side &&
+				!( readinessPolicy.allowRoundSideChanges && occupant.active ) ) || occupant.active !=
 				MPMatchRosterRoleIsActive( entry.role ) || occupant.roles !=
 				MPMatchPrincipalRolesForRosterRole( entry.role ) ) {
 				return false;
@@ -2324,6 +2399,10 @@ bool mpMatchSession::ValidateInvariants( void ) const {
 		readinessPolicy.botPolicy >= MP_MATCH_BOT_POLICY_COUNT ||
 		readinessPolicy.minimumActiveHumans < 0 ||
 		readinessPolicy.minimumActiveHumans > MP_MATCH_MAX_PARTICIPANTS ||
+		readinessPolicy.minimumActiveParticipants < 0 ||
+		readinessPolicy.minimumActiveParticipants > MP_MATCH_MAX_PARTICIPANTS ||
+		readinessPolicy.minimumActiveOnAnySide < 0 ||
+		readinessPolicy.minimumActiveOnAnySide > MP_MATCH_MAX_PARTICIPANTS ||
 		readinessPolicy.minimumActivePerRequiredSide < 0 ||
 		readinessPolicy.minimumActivePerRequiredSide > MP_MATCH_MAX_PARTICIPANTS ||
 		( invariantRequiredSideCount > 0 &&
@@ -2342,7 +2421,8 @@ bool mpMatchSession::ValidateInvariants( void ) const {
 	if ( ( invariantUsesTeamReady &&
 		( !readinessPolicy.teamMode || readinessPolicy.requiredSideMask == 0 ) ) ||
 		( !readinessPolicy.teamMode &&
-			( readinessPolicy.maximumActivePerSide != 0 ||
+			( readinessPolicy.allowRoundSideChanges || readinessPolicy.maximumActivePerSide != 0 ||
+				readinessPolicy.minimumActiveOnAnySide != 0 ||
 				readinessPolicy.minimumActivePerRequiredSide != 0 ||
 				readinessPolicy.requiredSideMask != 0 ) ) ) {
 		return false;
@@ -2352,8 +2432,8 @@ bool mpMatchSession::ValidateInvariants( void ) const {
 		return false;
 	}
 	if ( readinessPolicy.maximumActivePerSide > 0 &&
-		readinessPolicy.minimumActivePerRequiredSide >
-			readinessPolicy.maximumActivePerSide ) {
+		( readinessPolicy.minimumActivePerRequiredSide > readinessPolicy.maximumActivePerSide ||
+			readinessPolicy.minimumActiveOnAnySide > readinessPolicy.maximumActivePerSide ) ) {
 		return false;
 	}
 	for ( int side = 0; side < MP_MATCH_SIDE_COUNT; ++side ) {

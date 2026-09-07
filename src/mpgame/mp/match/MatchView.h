@@ -18,19 +18,20 @@
 
 class idBitMsg;
 
-static const unsigned short MP_MATCH_VIEW_SCHEMA_VERSION = 3;
+static const unsigned short MP_MATCH_VIEW_SCHEMA_VERSION = 4;
 
 // A complete view can contain 32 public identities, 32 operation decisions,
 // 32 map-pool entries, 64 veto/map-history entries, a four-entry evidence tail
 // and recipient-authorized tactical data.  That state cannot truthfully fit in
-// the 1024-byte operation request budget.  7680 is a hard codec limit, verified
+// the 1024-byte operation request budget.  7936 is a hard codec limit, verified
 // against the schema's
-// maximum legal projection, and reserves 512 bytes in openQ4's 8192-byte game
+// maximum legal projection, and reserves 256 bytes in openQ4's 8192-byte game
 // reliable-message buffer for the outer message tag and transport evolution.
 // All nested arrays and strings are separately bounded and hostile
 // over-capacity inputs fail closed.
-static const int MP_MATCH_VIEW_MAX_MESSAGE_BYTES = 7680;
-static const int MP_MATCH_VIEW_MAX_TOP_LEVEL_FIELDS = 25;
+static const int MP_MATCH_VIEW_MAX_MESSAGE_BYTES = 7936;
+static const int MP_MATCH_VIEW_MAX_TOP_LEVEL_FIELDS = 26;
+static const int MP_MATCH_VIEW_RESULT_NAME_BYTES = 64;
 static const int MP_MATCH_VIEW_SIDE_NONE = -1;
 static const int MP_MATCH_VIEW_SIDE_COUNT = 2;
 static const int MP_MATCH_VIEW_MAX_PARTICIPANTS = 32;
@@ -695,6 +696,49 @@ typedef struct mpMatchViewFollowTarget_s {
 ===============================================================================
 */
 
+typedef enum {
+	MP_MATCH_VIEW_RESULT_NONE = 0,
+	MP_MATCH_VIEW_RESULT_DECIDED,
+	MP_MATCH_VIEW_RESULT_FORFEIT,
+	MP_MATCH_VIEW_RESULT_DRAW,
+	MP_MATCH_VIEW_RESULT_ABORTED,
+	MP_MATCH_VIEW_RESULT_OUTCOME_COUNT
+} mpMatchViewResultOutcome_t;
+
+typedef enum {
+	MP_MATCH_VIEW_RESULT_REASON_NONE = 0,
+	MP_MATCH_VIEW_RESULT_REASON_LIMIT_REACHED,
+	MP_MATCH_VIEW_RESULT_REASON_FORFEIT,
+	MP_MATCH_VIEW_RESULT_REASON_MATCH_ABORTED,
+	MP_MATCH_VIEW_RESULT_REASON_SESSION_END,
+	MP_MATCH_VIEW_RESULT_REASON_MAP_SHUTDOWN,
+	MP_MATCH_VIEW_RESULT_REASON_FATAL_RESET,
+	MP_MATCH_VIEW_RESULT_REASON_COUNT
+} mpMatchViewResultReason_t;
+
+// Frozen public match outcome, independent of optional evidence recording.
+// Retained through review, nextgame and the following warmup; cleared when a
+// new countdown or session begins. Identity and sanitized UTF-8 name refer to
+// the result revision, never to a present slot occupant or mutable roster row.
+// winnerSide is a gameplay team, not a series competition side. Individual
+// winners use winnerParticipantId/name instead. Draws and aborts have no winner.
+typedef struct mpMatchViewTerminalResult_s {
+	mpMatchViewResultOutcome_t outcome;
+	mpMatchViewResultReason_t reason;
+	mpMatchProtocolRevision_t resultRevision;
+	int winnerSide;
+	mpMatchProtocolParticipantId_t winnerParticipantId;
+	unsigned char winnerNameLength;
+	char winnerName[ MP_MATCH_VIEW_RESULT_NAME_BYTES + 1 ];
+
+	void Clear( void );
+} mpMatchViewTerminalResult_t;
+
+// Sanitizes untrusted public names without truncating a UTF-8 code point.
+// The fallback is stable within the enclosing session and requires no roster.
+void MPMatchViewSetResultWinnerName( mpMatchViewTerminalResult_t &result,
+	const char *name );
+
 typedef struct mpMatchViewPublicState_s {
 	unsigned short				schemaVersion;
 	mpMatchProtocolSessionId_t	sessionId;
@@ -714,6 +758,7 @@ typedef struct mpMatchViewPublicState_s {
 	mpMatchViewProposalSummary_t	globalProposal;
 	mpMatchViewSeriesSummary_t	series;
 	mpMatchViewEvidenceSummary_t	evidence;
+	mpMatchViewTerminalResult_t terminalResult;
 	mpMatchViewAllowedOperationMask_t allowedOperations;
 	unsigned char				operationAvailabilityCount;
 	mpMatchViewOperationAvailability_t operationAvailability[ MP_MATCH_VIEW_MAX_OPERATION_AVAILABILITIES ];

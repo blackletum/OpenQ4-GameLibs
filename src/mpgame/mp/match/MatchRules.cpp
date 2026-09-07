@@ -67,6 +67,8 @@ static bool ValidateGameTypeField( const mpMatchRulesDraft &draft,
 	const mpMatchRulesValidationContext_t &context, mpRuleValidationFailure_t &failure );
 static bool ValidateMinActiveHumansField( const mpMatchRulesDraft &draft,
 	const mpMatchRulesValidationContext_t &context, mpRuleValidationFailure_t &failure );
+static bool ValidateMinActivePlayersField( const mpMatchRulesDraft &draft,
+	const mpMatchRulesValidationContext_t &context, mpRuleValidationFailure_t &failure );
 static bool ValidateMinTeamSizeField( const mpMatchRulesDraft &draft,
 	const mpMatchRulesValidationContext_t &context, mpRuleValidationFailure_t &failure );
 static bool ValidateRosterSizeField( const mpMatchRulesDraft &draft,
@@ -228,7 +230,10 @@ static const mpRuleFieldDescriptor_t ruleFields[] = {
 	MP_RULE_FIELD( MP_RULE_TIMEOUT_RESUME_POLICY, "timeout_resume_policy", MP_RULE_TYPE_ENUM,
 		MP_TIMEOUT_RESUME_OWNER_OR_REFEREE, MP_TIMEOUT_RESUME_REFEREE_ONLY,
 		MP_TIMEOUT_RESUME_OWNER_OR_REFEREE, timeoutResumeValues, MP_RULE_MODES_TIMEOUT, MP_RULE_FROZEN_STAGE,
-		"#str_41664", "#str_41665", ValidateAnyField )
+		"#str_41664", "#str_41665", ValidateAnyField ),
+	MP_RULE_FIELD( MP_RULE_MIN_ACTIVE_PLAYERS, "min_active_players", MP_RULE_TYPE_INTEGER,
+		0, 32, 2, NULL, MP_RULE_MODES_ALL_PUBLIC, MP_RULE_FROZEN_STAGE,
+		"#str_42680", "#str_42681", ValidateMinActivePlayersField )
 };
 
 #undef MP_RULE_FIELD
@@ -472,6 +477,19 @@ static bool ValidateMinActiveHumansField( const mpMatchRulesDraft &draft,
 	if ( value > context.maxClients ) {
 		SetFailure( failure, MP_RULE_ERROR_SERVER_CAPACITY, MP_RULE_MIN_ACTIVE_HUMANS,
 			value, 1, context.maxClients );
+		return false;
+	}
+	return true;
+}
+
+static bool ValidateMinActivePlayersField( const mpMatchRulesDraft &draft,
+	const mpMatchRulesValidationContext_t &context, mpRuleValidationFailure_t &failure ) {
+	const int value = draft.GetInteger( MP_RULE_MIN_ACTIVE_PLAYERS );
+	const int maximum = draft.GetInteger( MP_RULE_GAME_TYPE ) == GAME_DUEL ?
+		Min( 2, context.maxClients ) : context.maxClients;
+	if ( value > maximum ) {
+		SetFailure( failure, MP_RULE_ERROR_SERVER_CAPACITY, MP_RULE_MIN_ACTIVE_PLAYERS,
+			value, 0, maximum );
 		return false;
 	}
 	return true;

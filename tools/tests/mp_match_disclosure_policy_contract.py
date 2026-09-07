@@ -300,10 +300,13 @@ def integration_contract(multiplayer: str, player: str, game_state: str) -> None
         "canonical disclosure view build",
     )
 
-    cycle = function_body(player, "void idPlayer::SpectateCycle")
+    attack_cycle = function_body(player, "void idPlayer::SpectateCycle")
+    require(attack_cycle, "CycleSpectatorFollow( 1 )", "attack uses the shared follow cycle")
+    cycle = function_body(player, "bool idPlayer::CycleSpectatorFollow")
     for token in (
-        "attempt < gameLocal.numClients",
-        "gameLocal.GetNextClientNum",
+        "Min( gameLocal.numClients, MAX_CLIENTS )",
+        "attempt <= count",
+        "SpectatorFollowClient( candidateSlot )",
         "candidate->spectating",
         "gameLocal.mpGame.CanSpectatorFollow",
         "spectator = candidateSlot",

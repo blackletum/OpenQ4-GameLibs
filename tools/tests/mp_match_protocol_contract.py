@@ -142,6 +142,10 @@ def timeout_window_phase_contract(source: str, session_source: str) -> None:
     # The descriptor phase gate runs first, so a descriptor which excludes
     # COUNTDOWN would reject a legally configured countdown timeout before the
     # session ever sees it.
+    for opcode in ("MP_MATCH_OP_READY_SET", "MP_MATCH_OP_TEAM_READY_SET"):
+        ready_phases = set(re.findall(r"MP_MATCH_PHASE_[A-Z]+", descriptor_row(source, opcode)))
+        if ready_phases != {"MP_MATCH_PHASE_WARMUP", "MP_MATCH_PHASE_COUNTDOWN"}:
+            raise AssertionError(f"{opcode} must allow readiness withdrawal during countdown")
     row = descriptor_row(source, "MP_MATCH_OP_TIMEOUT_REQUEST")
     phases = set(re.findall(r"MP_MATCH_PHASE_[A-Z]+", row))
     if "PHASE_LIVE" in row:

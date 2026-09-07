@@ -101,8 +101,10 @@ def main() -> None:
     set_ready = body(multiplayer, "void idMultiplayerGame::ServerSetPlayerReady")
     require(set_ready, "!playerState[ clientNum ].ingame", "ready in-game eligibility")
     require(set_ready, "player->wantSpectate", "ready spectator eligibility")
-    require(set_ready, "player->IsFakeClient()", "ready bot eligibility")
-    send_ready = body(multiplayer, "static void MPSendReady")
+    require(set_ready, "!MPIsHumanMatchParticipant( player )", "ready bot eligibility")
+    human_participant = body(multiplayer, "static bool MPIsHumanMatchParticipant")
+    require(human_participant, "!botManager.IsBot( player->entityNumber )", "AI slot eligibility")
+    send_ready = body(multiplayer, "void idMultiplayerGame::SendReady")
     require(send_ready, "outMsg.WriteByte( isReady ? 1 : 0 )", "ready byte transport")
     reject(send_ready, "WriteBits( isReady", "ready partial-byte transport")
 
@@ -117,7 +119,8 @@ def main() -> None:
     require(eligible_vote, "gameLocal.mpGame.IsInGame", "vote electorate connection state")
     require(eligible_vote, "!player->spectating", "vote electorate spectator exclusion")
     require(eligible_vote, "!player->wantSpectate", "vote electorate pending spectator exclusion")
-    require(eligible_vote, "!player->IsFakeClient()", "vote electorate bot exclusion")
+    require(eligible_vote, "!player->IsFakeClient()", "vote electorate special-view exclusion")
+    require(eligible_vote, "!botManager.IsBot( clientNum )", "vote electorate bot exclusion")
 
     bounded_parse = body(multiplayer, "static bool ParseBoundedVoteInteger")
     require(bounded_parse, "text[ 0 ] == '\\0'", "strict bounded integer empty input")

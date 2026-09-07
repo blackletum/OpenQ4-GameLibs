@@ -549,13 +549,39 @@ bool rvFreezeTagGameState::FindThawSpot( idPlayer* frozen, idPlayer* thawer, idV
 
 /*
 ================
-rvFreezeTagGameState::CanReachToThaw
+rvFreezeTagGameState::ReportThawState
 
-Quake Live requires line of sight to a frozen team mate unless the server turns
-that off.  Without it a body on a ledge, in a vent or one floor up thaws from
-wherever happens to be within the radius, including through the floor.
+Server-local diagnostics used by the engine-command gameplay smoke.
 ================
 */
+void rvFreezeTagGameState::ReportThawState( void ) const {
+	const int radius = Max( 16, gameLocal.serverInfo.GetInt( "si_freezeThawRadius" ) );
+	for ( int i = 0; i < gameLocal.numClients; ++i ) {
+		idPlayer *frozen = gameLocal.GetClientByNum( i );
+		if ( frozen == NULL || frozen->health > 0 ) {
+			continue;
+		}
+		gameLocal.Printf( "MP_FREEZE slot=%d eliminated=%d progress=%d auto=%d radius=%d duration=%d live=%d\n",
+			i, IsEliminated( i ), thawProgress[ i ], autoThawTime[ i ], radius,
+			gameLocal.serverInfo.GetInt( "si_freezeThawTime" ), RoundIsLive() );
+		for ( int j = 0; j < gameLocal.numClients; ++j ) {
+			idPlayer *mate = gameLocal.GetClientByNum( j );
+			if ( mate == NULL || mate == frozen || mate->team != frozen->team ) {
+				continue;
+			}
+			trace_t trace;
+			memset( &trace, 0, sizeof( trace ) );
+			gameLocal.TracePoint( mate, trace, mate->GetEyePosition(),
+				frozen->GetPhysics()->GetOrigin() + idVec3( 0, 0, 16 ), MASK_SOLID, mate );
+			gameLocal.Printf( "MP_THAW body=%d mate=%d alive=%d reachable=%d trace=%.3f hit=%d contents=%d\n",
+				i, j, PlayerIsAlive( mate ), CanReachToThaw( frozen, mate, radius * radius ),
+				trace.fraction, trace.c.entityNum, trace.c.contents );
+		}
+	}
+}
+
+// A rescue requires visible contact unless the server explicitly enables
+// through-surface thawing. Distance alone would also rescue through floors.
 bool rvFreezeTagGameState::CanReachToThaw( idPlayer* frozen, idPlayer* mate, int thawRadiusSquared ) const {
 	idVec3	frozenOrigin;
 	idVec3	mateOrigin;
@@ -576,13 +602,16 @@ bool rvFreezeTagGameState::CanReachToThaw( idPlayer* frozen, idPlayer* mate, int
 		return true;
 	}
 
-	// eye height on both ends, so a body lying on the floor is not blocked by
-	// the floor it is lying on
+	// Start at the rescuer's eyes and ignore their own solid player box.
+	// Tracing toward their feet from the body hit that box on every approach,
+	// preventing otherwise unobstructed rescues. A hit on the frozen body is
+	// visible contact, while intervening world geometry still blocks the thaw.
 	frozenOrigin.z += 16.0f;
-	mateOrigin.z += 16.0f;
-
-	gameLocal.TracePoint( frozen, trace, frozenOrigin, mateOrigin, MASK_SOLID, frozen );
-	return ( trace.fraction >= 1.0f );
+	mateOrigin = mate->GetEyePosition();
+	memset( &trace, 0, sizeof( trace ) );
+	trace.c.entityNum = ENTITYNUM_NONE;
+	gameLocal.TracePoint( mate, trace, mateOrigin, frozenOrigin, MASK_SOLID, mate );
+	return ( trace.fraction >= 1.0f || trace.c.entityNum == frozen->entityNumber );
 }
 
 /*
@@ -662,14 +691,23 @@ void rvRedRoverGameState::RoundBegin( void ) {
 
 /*
 ================
-rvRedRoverGameState::PrepareNextRound
+rvRedRoverGameState::NewState
 
-Deaths progressively move everyone onto the winning side.  Restore a stable,
-balanced roster before ResetRound respawns the field, without routing these
-between-round assignments through SwitchToTeam (which would kill and score
-players a second time).
+Restore declared roster affiliations before the next warmup's admission gate.
 ================
 */
+bool rvRedRoverGameState::NewState( mpGameState_t newState ) {
+	if ( !rvRoundGameState::NewState( newState ) ) {
+		return false;
+	}
+	if ( !gameLocal.isClient && newState == WARMUP && gameLocal.mpGame.IsManagedMatch() ) {
+		PrepareNextRound();
+	}
+	return true;
+}
+
+// Restore declared managed rosters; unrostered players use the stable balanced
+// order. The world reset respawns them without a second death or score change.
 void rvRedRoverGameState::PrepareNextRound( void ) {
 	int activePlayer = 0;
 	int teamCount[TEAM_MAX];
@@ -687,18 +725,22 @@ void rvRedRoverGameState::PrepareNextRound( void ) {
 			continue;
 		}
 
-		const int targetTeam = ( activePlayer++ & 1 ) ? TEAM_STROGG : TEAM_MARINE;
-		player->team = targetTeam;
-		player->latchedTeam = targetTeam;
-		player->GetUserInfo()->Set( "ui_team", gameLocal.mpGame.teamNames[targetTeam] );
-		if ( player->IsLocalClient() ) {
-			cvarSystem->SetCVarString( "ui_team", gameLocal.mpGame.teamNames[targetTeam] );
+		int targetTeam = ( activePlayer++ & 1 ) ? TEAM_STROGG : TEAM_MARINE;
+		if ( gameLocal.mpGame.IsManagedMatch() ) {
+			const mpMatchSession &session = gameLocal.mpGame.GetMatchSession();
+			mpParticipantId participant;
+			uint32_t generation = 0;
+			if ( session.GetSlotGeneration( i, generation ) &&
+				session.ResolveSlotBinding( i, generation, participant ) ) {
+				const mpMatchRosterSeat *seat = session.GetRosterSeat( session.FindRosterSeat( participant ) );
+				if ( seat != NULL && seat->declared ) {
+					targetTeam = seat->side;
+				}
+			}
 		}
-
-		// Replicate the new side and refresh remote HUDs.  latchedTeam was set
-		// above so the authoritative player deliberately bypasses SwitchToTeam.
-		cmdSystem->BufferCommandText( CMD_EXEC_NOW, va( "updateUI %d\n", player->entityNumber ) );
-		teamCount[targetTeam]++;
+		if ( gameLocal.mpGame.ApplyRoundTeamAssignment( player, targetTeam, false ) ) {
+			teamCount[targetTeam]++;
+		}
 	}
 
 	gameLocal.Printf( "red rover: prepared round %d with %d Marine and %d Strogg players\n",
@@ -737,8 +779,10 @@ void rvRedRoverGameState::PlayerDeath( idPlayer* dead, idPlayer* killer ) {
 	const int oldTeam = dead->team;
 	newTeam = ( dead->team == TEAM_MARINE ) ? TEAM_STROGG : TEAM_MARINE;
 
-	dead->GetUserInfo()->Set( "ui_team", gameLocal.mpGame.teamNames[ newTeam ] );
-	cmdSystem->BufferCommandText( CMD_EXEC_NOW, va( "updateUI %d\n", dead->entityNumber ) );
+	if ( !gameLocal.mpGame.ApplyRoundTeamAssignment( dead, newTeam, true ) ) {
+		gameLocal.Warning( "Red Rover could not commit a forced side conversion for client %d", dead->entityNumber );
+		return;
+	}
 
 	gameLocal.mpGame.CenterPrint( dead->entityNumber, "#str_41360", idMultiplayerGame::CPARM_TEAM, newTeam );
 

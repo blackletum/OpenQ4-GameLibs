@@ -9,6 +9,7 @@ This repository is the canonical source-input repository for SDK/game-library co
 ## Included
 - Game library source code in `src/game` and `src/mpgame`
 - Shared SDK-era interfaces used by Quake 4 style game modules
+- Multiplayer chat delivery for openQ4's retained conversation panel, channel switching and history, with the existing chat bindings preserved
 - Meson/Ninja build configuration for modern local builds
 
 ## Not Included

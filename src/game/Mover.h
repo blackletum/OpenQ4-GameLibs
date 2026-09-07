@@ -402,6 +402,8 @@ public:
 	void					UpdateBuddies( int val );
 	idMover_Binary *		GetActivateChain( void ) const { return activateChain; }
 	idMover_Binary *		GetMoveMaster( void ) const { return moveMaster; }
+	moverState_t			GetMoverState( void ) const { return moverState; }
+	qhandle_t				GetAreaPortal( void ) const { return areaPortal; }
 	void					BindTeam( idEntity *bindTo );
 	void					SetBlocked( bool b );
 	bool					IsBlocked( void );
@@ -446,7 +448,6 @@ protected:
 
 	void					UpdateMoverSound( moverState_t state );
 	void					SetMoverState( moverState_t newstate, int time );
-	moverState_t			GetMoverState( void ) const { return moverState; }
 	void					FindGuiTargets( void );
 	void					SetGuiState( const char *key, const char *val ) const;
 

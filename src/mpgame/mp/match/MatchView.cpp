@@ -38,7 +38,7 @@ static const unsigned long long MP_MATCH_VIEW_MAX_SIGNED_TIME = 0x7fffffffffffff
 static const unsigned int MP_MATCH_VIEW_MAX_OPERATION_ID = 0x7fffffffu;
 static const unsigned char MP_MATCH_VIEW_OPTIONAL_EXTENSION_BIT = 0x80;
 static const unsigned char MP_MATCH_VIEW_FIELD_ID_MASK = 0x7f;
-static const unsigned char MP_MATCH_VIEW_REQUIRED_FIELD_COUNT = 24;
+static const unsigned char MP_MATCH_VIEW_REQUIRED_FIELD_COUNT = 25;
 static const unsigned char MP_MATCH_VIEW_KNOWN_SIDE_MASK =
 	( 1u << MP_MATCH_VIEW_SIDE_COUNT ) - 1u;
 static const unsigned char MP_MATCH_VIEW_PARTICIPANT_CONNECTED_BIT = 1u << 0;
@@ -73,7 +73,8 @@ typedef enum {
 	MP_MATCH_VIEW_FIELD_INVITATIONS = 21,
 	MP_MATCH_VIEW_FIELD_QUEUES = 22,
 	MP_MATCH_VIEW_FIELD_CONTROL_REVISION = 23,
-	MP_MATCH_VIEW_FIELD_EVIDENCE = 24
+	MP_MATCH_VIEW_FIELD_EVIDENCE = 24,
+	MP_MATCH_VIEW_FIELD_TERMINAL_RESULT = 25
 } mpMatchViewField_t;
 
 static bool BuildPayload( const mpSessionView &view, byte *encoded,
@@ -195,6 +196,71 @@ static bool IsAllZero( const char *value, int bytes ) {
 		}
 	}
 	return true;
+}
+
+static int ResultNameCodePointBytes( const char *value, int remaining ) {
+	if ( remaining < 1 ) return 0;
+	const unsigned char first = static_cast<unsigned char>( value[ 0 ] );
+	int bytes = first < 0x80 ? 1 : first >= 0xc2 && first <= 0xdf ? 2 :
+		first >= 0xe0 && first <= 0xef ? 3 : first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+	if ( bytes == 0 || bytes > remaining ) return 0;
+	unsigned int point = first & ( bytes == 1 ? 0x7f : bytes == 2 ? 0x1f : bytes == 3 ? 0x0f : 7 );
+	for ( int i = 1; i < bytes; ++i ) {
+		const unsigned char next = static_cast<unsigned char>( value[ i ] );
+		if ( ( next & 0xc0 ) != 0x80 ) return 0;
+		point = ( point << 6 ) | ( next & 0x3f );
+	}
+	if ( ( bytes == 2 && point < 0x80 ) || ( bytes == 3 && point < 0x800 ) ||
+		( bytes == 4 && point < 0x10000 ) || point > 0x10ffff ||
+		( point >= 0xd800 && point <= 0xdfff ) || point < 0x20 ||
+		( point >= 0x7f && point <= 0x9f ) || point == 0x2028 || point == 0x2029 ||
+		( point >= 0x202a && point <= 0x202e ) || ( point >= 0x2066 && point <= 0x2069 ) ) return 0;
+	return bytes;
+}
+
+static bool ValidateTerminalResult( const mpMatchViewPublicState_t &state,
+	mpMatchViewError_t *error ) {
+	const mpMatchViewTerminalResult_t &result = state.terminalResult;
+	bool valid = result.outcome >= MP_MATCH_VIEW_RESULT_NONE &&
+		result.outcome < MP_MATCH_VIEW_RESULT_OUTCOME_COUNT &&
+		result.reason >= MP_MATCH_VIEW_RESULT_REASON_NONE &&
+		result.reason < MP_MATCH_VIEW_RESULT_REASON_COUNT &&
+		( result.winnerSide == MP_MATCH_VIEW_SIDE_NONE || IsSide( result.winnerSide ) ) &&
+		result.winnerNameLength <= MP_MATCH_VIEW_RESULT_NAME_BYTES;
+	if ( !valid ) {
+		SetError( error, MP_MATCH_VIEW_ERROR_INVALID_STATE, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+		return false;
+	}
+	valid = IsAllZero( result.winnerName + result.winnerNameLength,
+		sizeof( result.winnerName ) - result.winnerNameLength );
+	for ( int offset = 0; valid && offset < result.winnerNameLength; ) {
+		const int bytes = ResultNameCodePointBytes( result.winnerName + offset,
+			result.winnerNameLength - offset );
+		valid = bytes != 0;
+		offset += bytes;
+	}
+	const bool individualWinner = result.winnerParticipantId != MP_MATCH_INVALID_PARTICIPANT_ID;
+	const bool teamWinner = IsSide( result.winnerSide );
+	const bool hasWinner = result.outcome == MP_MATCH_VIEW_RESULT_DECIDED ||
+		result.outcome == MP_MATCH_VIEW_RESULT_FORFEIT;
+	if ( result.outcome == MP_MATCH_VIEW_RESULT_NONE ) {
+		valid = valid && result.reason == MP_MATCH_VIEW_RESULT_REASON_NONE && result.resultRevision == 0;
+	} else {
+		valid = valid && result.resultRevision != 0 && result.resultRevision <= state.sessionRevision &&
+			( state.lifecycle.phase == GAMEREVIEW || state.lifecycle.phase == NEXTGAME || state.lifecycle.phase == WARMUP );
+		if ( result.outcome == MP_MATCH_VIEW_RESULT_DECIDED || result.outcome == MP_MATCH_VIEW_RESULT_DRAW ) {
+			valid = valid && result.reason == MP_MATCH_VIEW_RESULT_REASON_LIMIT_REACHED;
+		} else if ( result.outcome == MP_MATCH_VIEW_RESULT_FORFEIT ) {
+			valid = valid && result.reason == MP_MATCH_VIEW_RESULT_REASON_FORFEIT;
+		} else {
+			// An unresolved forfeit is explicitly an abort, never a guessed winner.
+			valid = valid && result.reason >= MP_MATCH_VIEW_RESULT_REASON_FORFEIT;
+		}
+	}
+	valid = valid && ( hasWinner ? individualWinner != teamWinner : !individualWinner && !teamWinner ) &&
+		( individualWinner ? result.winnerNameLength != 0 : result.winnerNameLength == 0 );
+	if ( !valid ) SetError( error, MP_MATCH_VIEW_ERROR_INVALID_STATE, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+	return valid;
 }
 
 static int CountBits64( unsigned long long value ) {
@@ -1139,6 +1205,7 @@ static bool ValidatePublicState( const mpMatchViewPublicState_t &state,
 				state.globalProposal.expiresAtEngineMsec <= state.clocks.engineTimeMsec ) ) ||
 		!ValidateSeries( state.series, error ) ||
 		!ValidateEvidence( state.evidence, error ) ||
+		!ValidateTerminalResult( state, error ) ||
 		!ValidateOperationAvailability( state, error ) ||
 		!ValidateDenial( state.denial, error ) ||
 		!ValidateRecipient( state.recipient, error ) ||
@@ -2010,6 +2077,31 @@ static bool DecodeEvidenceField( idBitMsg &field,
 	return FinishFieldRead( field, MP_MATCH_VIEW_FIELD_EVIDENCE, error );
 }
 
+static bool DecodeTerminalResultField( idBitMsg &field,
+	mpMatchViewTerminalResult_t &result, mpMatchViewError_t *error ) {
+	unsigned char outcome = 0, reason = 0;
+	if ( !ReadByteValue( field, outcome, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ||
+		!ReadByteValue( field, reason, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ||
+		!ReadUInt64Value( field, result.resultRevision, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ||
+		!ReadSideValue( field, result.winnerSide, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ||
+		!ReadUIntValue( field, result.winnerParticipantId, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ||
+		!ReadByteValue( field, result.winnerNameLength, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error ) ) return false;
+	if ( outcome >= MP_MATCH_VIEW_RESULT_OUTCOME_COUNT || reason >= MP_MATCH_VIEW_RESULT_REASON_COUNT ||
+		result.winnerNameLength > MP_MATCH_VIEW_RESULT_NAME_BYTES ) {
+		SetError( error, MP_MATCH_VIEW_ERROR_INVALID_STATE, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+		return false;
+	}
+	result.outcome = static_cast<mpMatchViewResultOutcome_t>( outcome );
+	result.reason = static_cast<mpMatchViewResultReason_t>( reason );
+	if ( field.GetRemainingReadBits() < result.winnerNameLength * 8 ||
+		( result.winnerNameLength != 0 && field.ReadData( result.winnerName,
+			result.winnerNameLength ) != result.winnerNameLength ) ) {
+		SetError( error, MP_MATCH_VIEW_ERROR_TRUNCATED, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+		return false;
+	}
+	return FinishFieldRead( field, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, error );
+}
+
 static bool DecodeParticipantsField( idBitMsg &field, mpMatchViewPublicState_t &state,
 	mpMatchViewError_t *error ) {
 	if ( !ReadByteValue( field, state.participantSummaryCount,
@@ -2273,6 +2365,8 @@ static bool DecodeKnownField( unsigned char fieldId, const byte *data, int lengt
 				fieldId, error ) && FinishFieldRead( field, fieldId, error );
 		case MP_MATCH_VIEW_FIELD_EVIDENCE:
 			return DecodeEvidenceField( field, view.publicState.evidence, error );
+		case MP_MATCH_VIEW_FIELD_TERMINAL_RESULT:
+			return DecodeTerminalResultField( field, view.publicState.terminalResult, error );
 		default:
 			SetError( error, MP_MATCH_VIEW_ERROR_UNKNOWN_REQUIRED_FIELD, fieldId );
 			return false;
@@ -2307,7 +2401,7 @@ static bool DecodePayload( const byte *data, int length,
 		const int fieldLength = payload.ReadUShort();
 		const unsigned char fieldId = rawTag & MP_MATCH_VIEW_FIELD_ID_MASK;
 		const bool known = fieldId >= MP_MATCH_VIEW_FIELD_SCHEMA &&
-			fieldId <= MP_MATCH_VIEW_FIELD_EVIDENCE;
+			fieldId <= MP_MATCH_VIEW_FIELD_TERMINAL_RESULT;
 		if ( fieldId == 0 || seen[ fieldId ] ) {
 			SetError( error, MP_MATCH_VIEW_ERROR_DUPLICATE_FIELD, fieldId, rawTag );
 			return false;
@@ -2342,7 +2436,7 @@ static bool DecodePayload( const byte *data, int length,
 		return false;
 	}
 	for ( int fieldId = MP_MATCH_VIEW_FIELD_SCHEMA;
-		fieldId <= MP_MATCH_VIEW_FIELD_EVIDENCE; ++fieldId ) {
+		fieldId <= MP_MATCH_VIEW_FIELD_TERMINAL_RESULT; ++fieldId ) {
 		if ( !seen[ fieldId ] ) {
 			SetError( error, MP_MATCH_VIEW_ERROR_MISSING_REQUIRED_FIELD,
 				static_cast<unsigned char>( fieldId ) );
@@ -2491,6 +2585,22 @@ mpMatchViewAcceptResult_t MPMatchViewAccept( mpSessionView &current,
 		SetError( error, MP_MATCH_VIEW_ERROR_STALE, MP_MATCH_VIEW_FIELD_VIEW_REVISION );
 		return MP_MATCH_VIEW_ACCEPT_REJECTED_STALE;
 	}
+	const mpMatchViewTerminalResult_t &previous = current.publicState.terminalResult;
+	const mpMatchViewTerminalResult_t &next = incoming.publicState.terminalResult;
+	if ( previous.resultRevision != 0 && next.resultRevision != 0 ) {
+		if ( next.resultRevision < previous.resultRevision ) {
+			SetError( error, MP_MATCH_VIEW_ERROR_STALE, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+			return MP_MATCH_VIEW_ACCEPT_REJECTED_STALE;
+		}
+		if ( next.resultRevision == previous.resultRevision &&
+			( next.outcome != previous.outcome || next.reason != previous.reason ||
+				next.winnerSide != previous.winnerSide || next.winnerParticipantId != previous.winnerParticipantId ||
+				next.winnerNameLength != previous.winnerNameLength ||
+				memcmp( next.winnerName, previous.winnerName, sizeof( next.winnerName ) ) != 0 ) ) {
+			SetError( error, MP_MATCH_VIEW_ERROR_INVALID_STATE, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT );
+			return MP_MATCH_VIEW_ACCEPT_REJECTED_INVALID;
+		}
+	}
 	if ( incoming.publicState.viewRevision == current.publicState.viewRevision ) {
 		return MP_MATCH_VIEW_ACCEPT_NO_CHANGE;
 	}
@@ -2617,6 +2727,43 @@ void mpMatchViewSeriesSummary_t::Clear( void ) {
 	}
 	for ( int i = 0; i < MP_MATCH_VIEW_MAX_SERIES_MAP_HISTORY; ++i ) {
 		mapHistory[ i ].Clear();
+	}
+}
+
+void mpMatchViewTerminalResult_t::Clear( void ) {
+	memset( this, 0, sizeof( *this ) );
+	winnerSide = MP_MATCH_VIEW_SIDE_NONE;
+}
+
+void MPMatchViewSetResultWinnerName( mpMatchViewTerminalResult_t &result, const char *name ) {
+	result.winnerNameLength = 0;
+	memset( result.winnerName, 0, sizeof( result.winnerName ) );
+	if ( result.winnerParticipantId == MP_MATCH_INVALID_PARTICIPANT_ID ) return;
+	if ( name != 0 ) {
+		for ( int input = 0; name[ input ] != '\0' &&
+			result.winnerNameLength < MP_MATCH_VIEW_RESULT_NAME_BYTES; ) {
+			int available = 0;
+			while ( available < 4 && name[ input + available ] != '\0' ) ++available;
+			const int bytes = ResultNameCodePointBytes( name + input, available );
+			if ( bytes == 0 ) {
+				result.winnerName[ result.winnerNameLength++ ] = '_';
+				++input;
+			} else {
+				if ( result.winnerNameLength + bytes > MP_MATCH_VIEW_RESULT_NAME_BYTES ) break;
+				memcpy( result.winnerName + result.winnerNameLength, name + input, bytes );
+				result.winnerNameLength += static_cast<unsigned char>( bytes );
+				input += bytes;
+			}
+		}
+	}
+	if ( result.winnerNameLength == 0 ) {
+		memcpy( result.winnerName, "player-", 7 );
+		result.winnerNameLength = 7;
+		char digits[ 10 ];
+		int count = 0;
+		unsigned int value = result.winnerParticipantId;
+		do { digits[ count++ ] = static_cast<char>( '0' + value % 10 ); value /= 10; } while ( value != 0 );
+		while ( count > 0 ) result.winnerName[ result.winnerNameLength++ ] = digits[ --count ];
 	}
 }
 
@@ -2826,6 +2973,7 @@ void mpMatchViewPublicState_t::Clear( void ) {
 	globalProposal.Clear();
 	series.Clear();
 	evidence.Clear();
+	terminalResult.Clear();
 	operationAvailabilityCount = MP_MATCH_OP_COUNT - 1;
 	for ( int i = 0; i < MP_MATCH_VIEW_MAX_OPERATION_AVAILABILITIES; ++i ) {
 		operationAvailability[ i ].Clear();
@@ -3734,6 +3882,17 @@ static bool BuildPayload( const mpSessionView &view, byte *encoded,
 	WriteEvidenceField( field, view.publicState.evidence );
 	if ( !AppendField( payload, MP_MATCH_VIEW_FIELD_EVIDENCE,
 		field, error ) ) return false;
+
+	BeginFieldWrite( field, fieldStorage, sizeof( fieldStorage ) );
+	const mpMatchViewTerminalResult_t &result = view.publicState.terminalResult;
+	field.WriteByte( result.outcome );
+	field.WriteByte( result.reason );
+	WriteUInt64Value( field, result.resultRevision );
+	field.WriteByte( SideToWire( result.winnerSide ) );
+	field.WriteLong( static_cast<int>( result.winnerParticipantId ) );
+	field.WriteByte( result.winnerNameLength );
+	field.WriteData( result.winnerName, result.winnerNameLength );
+	if ( !AppendField( payload, MP_MATCH_VIEW_FIELD_TERMINAL_RESULT, field, error ) ) return false;
 
 	if ( payload.IsOverflowed() || payload.GetSize() > MP_MATCH_VIEW_MAX_PAYLOAD_BYTES ) {
 		SetError( error, MP_MATCH_VIEW_ERROR_PAYLOAD_TOO_LARGE, 0,

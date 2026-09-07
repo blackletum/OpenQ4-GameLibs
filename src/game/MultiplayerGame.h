@@ -226,7 +226,7 @@ const int MP_PLAYER_MAXDEATHS = 999;
 
 const int MAX_AP = 5;
 
-const int CHAT_HISTORY_SIZE = 2048;
+const int CHAT_HISTORY_SIZE = 32768;
 const int RCON_HISTORY_SIZE = 4096;
 
 const int KILL_NOTIFICATION_LEN = 256;

@@ -16,7 +16,7 @@
 
 class idStr;
 
-static const uint32_t MP_MATCH_RULES_SCHEMA_VERSION = 1;
+static const uint32_t MP_MATCH_RULES_SCHEMA_VERSION = 2;
 
 /*
 ===============================================================================
@@ -64,6 +64,7 @@ typedef enum {
 	MP_RULE_TEAM_TIMEOUT_SECONDS,
 	MP_RULE_TIMEOUT_REQUEST_WINDOW,
 	MP_RULE_TIMEOUT_RESUME_POLICY,
+	MP_RULE_MIN_ACTIVE_PLAYERS,
 	MP_RULE_FIELD_COUNT
 } mpRuleFieldId_t;
 

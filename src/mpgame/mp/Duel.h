@@ -20,6 +20,9 @@ public:
 					rvDuelGameState( bool allocPrevious = true );
 
 	virtual void	Clear( void );
+	virtual void	SendState( const idMessageSender &sender, int clientNum = -1 );
+	virtual void	ReceiveState( const idBitMsg &msg );
+	virtual void	PackState( idBitMsg &msg );
 	virtual void	Run( void );
 	virtual bool	NewState( mpGameState_t newState );
 
@@ -37,6 +40,10 @@ public:
 	// player numbers of everyone waiting for a turn, in arrival order
 	int				GetQueuePosition( int clientNum ) const;
 	int				GetQueueLength( void ) const { return queue.Num(); }
+	void			SetForfeitingContender( int clientNum ) {
+						forfeitingContender = IsContender( clientNum ) ? clientNum : -2;
+					}
+	void			CancelTurnover( void ) { turnoverCancelled = true; }
 	bool			IsContender( int clientNum ) const {
 						return ( clientNum >= 0 &&
 							( clientNum == contenders[ 0 ] || clientNum == contenders[ 1 ] ) );
@@ -49,6 +56,9 @@ private:
 
 	// the two players currently holding the arena
 	int				contenders[ 2 ];
+	int				previousContenders[ 2 ];
+	int				forfeitingContender;
+	bool			turnoverCancelled;
 	idList<int>		queue;
 
 	static gameStateType_t type;

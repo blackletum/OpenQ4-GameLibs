@@ -184,6 +184,7 @@ def static_contracts(header: str, source: str) -> None:
 
 
 HARNESS = r'''
+#include <initializer_list>
 #include <stdint.h>
 #include <string.h>
 
@@ -1082,6 +1083,28 @@ int main(void) {
 	CHECK(!reviewAdvance.hasParticipantTarget && !reviewAdvance.hasTeamTarget &&
 		reviewAdvance.argumentCount == 0);
 
+	// A restored completed map is in warmup. Only the server's accepted
+	// availability can authorize its continuation, and never during live play.
+	for (int phase : {WARMUP, COUNTDOWN, GAMEON, GAMEREVIEW, NEXTGAME}) {
+		for (bool permitted : {false, true}) {
+			view.publicState.lifecycle.phase = static_cast<mpGameState_t>(phase);
+			mpMatchViewOperationAvailability_t &advanceAvailability =
+				view.publicState.operationAvailability[MP_MATCH_OP_SERIES_ADVANCE - 1];
+			advanceAvailability.available = permitted;
+			advanceAvailability.reason = permitted ? MP_MATCH_PROTOCOL_REASON_OK :
+				MP_MATCH_PROTOCOL_REASON_CONFLICT;
+			++view.publicState.viewRevision;
+			CHECK(model.IngestAcceptedView(view, &error) == MP_MATCH_CONTROL_INGEST_UPDATED);
+			CHECK(model.OperationContextAccepted(MP_MATCH_OP_SERIES_ADVANCE) ==
+				(phase == GAMEREVIEW || (phase == WARMUP && permitted)));
+			guarded = guardedBefore;
+			const bool accepted = model.BuildRequest(MP_MATCH_CONTROL_COMMAND_SERIES_ADVANCE,
+				++requestId, guarded, &error);
+			CHECK(accepted == (permitted && (phase == WARMUP || phase == GAMEREVIEW)));
+			if (!accepted) CHECK(memcmp(&guarded, &guardedBefore, sizeof(guarded)) == 0);
+		}
+	}
+
 	// Duel binding has a deliberately narrower presentation boundary than the
 	// generic series-management capability and cannot leak into other modes,
 	// terminal series states, or review.
@@ -1148,8 +1171,8 @@ int main(void) {
 	CHECK(error.reason == MP_MATCH_CONTROL_ERROR_SELECTION_REQUIRED);
 	CHECK(model.SelectReplacementRow(replacement));
 
-	// A duel contestant has no gameplay team. Forfeit uses the stable
-	// competition side, while team timeout correctly remains unavailable.
+	// A Duel contestant has no gameplay team. Forfeit and timeout use the
+	// server-accepted competition side without granting team-management powers.
 	mpMatchViewOperationAvailability_t &duelOperatorAuthority =
 		view.publicState.operationAvailability[MP_MATCH_OP_BROADCASTER_SET - 1];
 	duelOperatorAuthority.available = false;
@@ -1166,7 +1189,11 @@ int main(void) {
 	CHECK(duelForfeit.hasTeamTarget &&
 		duelForfeit.teamTarget == MP_MATCH_TEAM_STROGG);
 	mpMatchOperationRequest_t duelTimeout; duelTimeout.Clear();
-	CHECK(!model.BuildRequest(MP_MATCH_CONTROL_COMMAND_TIMEOUT,
+	CHECK(model.BuildRequest(MP_MATCH_CONTROL_COMMAND_TIMEOUT,
+		++requestId, duelTimeout, &error));
+	CHECK(duelTimeout.hasTeamTarget && duelTimeout.teamTarget == MP_MATCH_TEAM_STROGG);
+	CHECK(model.ActionSideUsesCompetitionLabels());
+	CHECK(!model.BuildRequest(MP_MATCH_CONTROL_COMMAND_TEAM_READY_TOGGLE,
 		++requestId, duelTimeout, &error));
 	CHECK(error.reason == MP_MATCH_CONTROL_ERROR_INVALID_SIDE);
 	view.publicState.recipient.side = 0;

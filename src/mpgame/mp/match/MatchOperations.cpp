@@ -460,6 +460,15 @@ static bool IsAuthorized( const mpMatchOperationRequest_t &request,
 			request.opcode == MP_MATCH_OP_FORFEIT ) ) {
 		return true;
 	}
+	// Duel contestants own their connection-bound competition-side budget;
+	// they do not acquire a captain role or authority over gameplay teams.
+	if ( context.ruleGameType == GAME_DUEL && context.actorCompetitionContestant &&
+		IsPlayableSide( context.actorCompetitionSide ) &&
+		principal.actorState != NULL && principal.actorState->active &&
+		( request.opcode == MP_MATCH_OP_TIMEOUT_REQUEST ||
+			request.opcode == MP_MATCH_OP_RESUME_REQUEST ) ) {
+		return true;
+	}
 
 	if ( ( principal.actorCapabilities & policy->anySessionCapability ) != 0 ) {
 		return true;
@@ -512,6 +521,7 @@ mpOperationAdapterContext_s::mpOperationAdapterContext_s( void ) {
 	expectedStagedRulesDigest = 0;
 	expectedProposalRevision = 0;
 	expectedSeriesRevision = 0;
+	seriesReviewRecovered = false;
 }
 
 void mpOperationExecutionResult_t::Clear( void ) {
@@ -918,19 +928,23 @@ mpOperationExecutionResult_t mpMatchOperationExecutor::ExecuteInternal(
 				request.expectedSessionRevision ), session, rules, proposals, series );
 		}
 
-		case MP_MATCH_OP_RESUME_REQUEST:
+		case MP_MATCH_OP_RESUME_REQUEST: {
 			if ( context.localOperator || context.preauthenticatedRefereeGrant ||
 					HasCapability( principal.actorCapabilities, MP_MATCH_CAP_PAUSE_CONTROL ) ) {
 				return FromSessionMutation( session.RequestResumeByAuthority(
 					request.expectedSessionRevision ), session, rules, proposals, series );
 			}
-			if ( !IsPlayableSide( principal.actorState->side ) ) {
+			const int resumeSide = context.ruleGameType == GAME_DUEL &&
+				context.actorCompetitionContestant ? context.actorCompetitionSide :
+				principal.actorState->side;
+			if ( !IsPlayableSide( resumeSide ) ) {
 				return Reject( MP_OPERATION_REASON_TARGET_ALIGNMENT,
 					session, rules, proposals, series );
 			}
 			return FromSessionMutation( session.RequestResumeByTeam(
-				principal.actorState->side, request.expectedSessionRevision ),
+				resumeSide, request.expectedSessionRevision ),
 				session, rules, proposals, series );
+		}
 
 		case MP_MATCH_OP_REF_AUTHENTICATE: {
 			mpOperationExecutionResult_t result = NeedsAdapter(
@@ -1321,7 +1335,8 @@ mpOperationExecutionResult_t mpMatchOperationExecutor::ExecuteInternal(
 
 		case MP_MATCH_OP_SERIES_ADVANCE: {
 			const mpGameState_t phase = session.GetPhase();
-			if ( phase == WARMUP || phase == NEXTGAME ) {
+			const bool recoveredReview = phase == WARMUP && context.seriesReviewRecovered;
+			if ( ( phase == WARMUP || phase == NEXTGAME ) && !recoveredReview ) {
 				if ( series.GetState() != MP_SERIES_READY ) {
 					return Reject( MP_OPERATION_REASON_SERIES_STATE,
 						session, rules, proposals, series );
@@ -1333,10 +1348,11 @@ mpOperationExecutionResult_t mpMatchOperationExecutor::ExecuteInternal(
 					series.GetNextMapToken() );
 				return result;
 			}
-			// Review owns the one explicit MAP_COMPLETE -> READY/COMPLETE
-			// transition.  A stale or early control cannot advance series state
-			// merely because SERIES_ADVANCE is broadly legal in lobby phases.
-			if ( phase != GAMEREVIEW || series.GetState() != MP_SERIES_MAP_COMPLETE ) {
+			// A completed-map checkpoint can resume in a new warmup after a
+			// server restart. Only the validated adapter recovery context may
+			// stand in for review; ordinary early/stale warmup controls still fail.
+			if ( ( phase != GAMEREVIEW && !recoveredReview ) ||
+				series.GetState() != MP_SERIES_MAP_COMPLETE ) {
 				return Reject( MP_OPERATION_REASON_SERIES_STATE,
 					session, rules, proposals, series );
 			}

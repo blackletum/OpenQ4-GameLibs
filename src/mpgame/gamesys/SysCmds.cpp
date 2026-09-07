@@ -3,6 +3,8 @@
 #pragma hdrstop
 
 #include "../Game_local.h"
+#include "../mp/RoundGameState.h"
+#include "../mp/RoundModes.h"
 // RAVEN BEGIN
 #include "../ai/AI.h"
 #if !defined(__GAME_PROJECTILE_H__)
@@ -3578,6 +3580,272 @@ void Cmd_ListMaps_f( const idCmdArgs& args ) {
 	gameLocal.mpGame.ListMaps();
 }
 
+// Server-local diagnostics for scripted gameplay validation. This reads the
+// actual game/session state and never changes players or synthesizes input.
+// These diagnostics exercise the same accepted-view GUI adapter as a local
+// menu action.  They never manufacture participants, revisions or authority.
+static void Cmd_OpenQ4MatchControl_f( const idCmdArgs &args ) {
+	idMultiplayerGame &mp = gameLocal.mpGame;
+	idUserInterface *gui = mp.GetMainGUI();
+	if ( !gameLocal.isMultiplayer || gameLocal.GetLocalPlayer() == NULL || gui == NULL ) {
+		gameLocal.Printf( "openq4_matchControl requires a local multiplayer client\n" );
+		return;
+	}
+	if ( args.Argc() == 2 && idStr::Icmp( args.Argv( 1 ), "open" ) == 0 ) {
+		// Review owns a separate GUI and its players are intentionally spectating.
+		// Exercise the normal menu toggle, without synthesizing device input.
+		if ( mp.GetCurrentMenu() != 1 ) {
+			if ( mp.GetCurrentMenu() != 0 ) {
+				mp.StartMenu();
+			}
+			gameLocal.sessionCommand = "game_startmenu";
+		}
+		gameLocal.Printf( "MP_CONTROL requested multiplayer menu\n" );
+		return;
+	}
+	if ( args.Argc() == 4 && idStr::Icmp( args.Argv( 1 ), "set" ) == 0 ) {
+		static const char *fields[] = {
+			"match_team_rows_sel_0", "match_replacement_rows_sel_0",
+			"match_proposal_rows_sel_0", "match_profile_rows_sel_0",
+			"match_rule_rows_sel_0", "match_series_map_rows_sel_0",
+			"match_role_choice", "match_proposal_scope_choice",
+			"match_series_profile_choice", "match_rule_value"
+		};
+		for ( int i = 0; i < static_cast<int>( sizeof( fields ) / sizeof( fields[ 0 ] ) ); ++i ) {
+			if ( strcmp( args.Argv( 2 ), fields[ i ] ) == 0 && strlen( args.Argv( 3 ) ) <= 64 ) {
+				gui->SetStateString( fields[ i ], args.Argv( 3 ) );
+				return;
+			}
+		}
+		gameLocal.Printf( "MP_CONTROL rejected unsupported choice\n" );
+		return;
+	}
+	if ( args.Argc() == 3 && idStr::Icmp( args.Argv( 1 ), "action" ) == 0 ) {
+		const char *token = args.Argv( 2 );
+		const int length = static_cast<int>( strlen( token ) );
+		if ( length < 1 || length > 64 || mp.GetCurrentMenu() != 1 ) {
+			gameLocal.Printf( "MP_CONTROL action requires the active multiplayer menu\n" );
+			return;
+		}
+		for ( int i = 0; i < length; ++i ) {
+			if ( ( token[ i ] < 'a' || token[ i ] > 'z' ) && token[ i ] != '_' ) {
+				gameLocal.Printf( "MP_CONTROL rejected malformed action\n" );
+				return;
+			}
+		}
+		mp.HandleGuiCommands( va( "matchControl %s", token ) );
+		gameLocal.Printf( "MP_CONTROL action=%s\n", token );
+		return;
+	}
+	if ( args.Argc() != 2 || idStr::Icmp( args.Argv( 1 ), "report" ) != 0 ) {
+		gameLocal.Printf( "usage: openq4_matchControl <open|report|action token|set choice value>\n" );
+		return;
+	}
+	const mpSessionView *view = mp.GetClientMatchView();
+	if ( view != NULL ) {
+		const mpMatchViewPublicState_t &state = view->publicState;
+		gameLocal.Printf( "MP_VIEW slot=%d side=%d roles=%u active=%d phase=%d round=%d pause=%d engine=%llu match=%llu vitals=%d items=%d follows=%d session=%llu revision=%llu\n",
+			state.recipient.slot, state.recipient.side, state.recipient.publicRoleMask,
+			state.recipient.active, state.lifecycle.phase, state.lifecycle.round, state.lifecycle.pauseState,
+			state.clocks.engineTimeMsec, state.clocks.matchTimeMsec,
+			view->teamVitalCount, view->itemTimingCount, view->followTargetCount,
+			state.sessionId, state.sessionRevision );
+		for ( int i = 0; i < view->teamVitalCount; ++i ) {
+			gameLocal.Printf( "MP_VITAL participant=%u side=%d health=%d armor=%d\n",
+				view->teamVitals[ i ].participantId, view->teamVitals[ i ].participantSide,
+				view->teamVitals[ i ].health, view->teamVitals[ i ].armor );
+		}
+		for ( int i = 0; i < view->followTargetCount; ++i ) {
+			gameLocal.Printf( "MP_FOLLOW participant=%u side=%d selectable=%d\n",
+				view->followTargets[ i ].participantId, view->followTargets[ i ].participantSide,
+				view->followTargets[ i ].selectable );
+		}
+		byte buffer[ MP_MATCH_VIEW_MAX_MESSAGE_BYTES ];
+		idBitMsg encoded;
+		encoded.Init( buffer, sizeof( buffer ) );
+		encoded.BeginWriting();
+		mpMatchViewError_t error;
+		if ( MPMatchViewEncode( encoded, *view, &error ) ) {
+			fileSystem->WriteFile( va( "match-probe/view-%d.bin", state.recipient.slot ),
+				buffer, encoded.GetSize() );
+		}
+	}
+	const idDict &state = gui->State();
+	for ( int i = 0; i < state.GetNumKeyVals(); ++i ) {
+		const idKeyValue *entry = state.GetKeyVal( i );
+		if ( entry != NULL && idStr::Icmpn( entry->GetKey(), "match_", 6 ) == 0 &&
+			idStr::Icmp( entry->GetKey(), "match_referee_credential" ) != 0 ) {
+			gameLocal.Printf( "MP_CONTROL %s=%s\n", entry->GetKey().c_str(), entry->GetValue().c_str() );
+		}
+	}
+}
+
+static void Cmd_OpenQ4ReportMPState_f( const idCmdArgs &args ) {
+	if ( !gameLocal.isMultiplayer ) {
+		gameLocal.Printf( "openq4_reportMPState requires multiplayer gameplay\n" );
+		return;
+	}
+	idMultiplayerGame &mp = gameLocal.mpGame;
+	rvGameState *state = mp.GetGameState();
+	if ( state == NULL ) {
+		return;
+	}
+	const rvRoundGameState *round = MPGameTypeHasAny( gameLocal.gameType, GTF_ROUND ) ?
+		static_cast< const rvRoundGameState * >( state ) : NULL;
+	gameLocal.Printf( "MP_STATE time=%d gametype=%d phase=%d session_phase=%d round=%d round_number=%d marine=%d strogg=%d timelimit=%d session_round=%d round_remaining=%d\n",
+		gameLocal.time, gameLocal.gameType, state->GetMPGameState(), mp.GetMatchSession().GetPhase(),
+		round != NULL ? round->GetRoundState() : RS_INACTIVE, round != NULL ? round->GetRoundNumber() : 0,
+		mp.GetScoreForTeam( TEAM_MARINE ), mp.GetScoreForTeam( TEAM_STROGG ),
+		gameLocal.serverInfo.GetInt( "si_timeLimit" ), mp.GetMatchSession().GetRoundState(),
+		round != NULL && round->GetRoundStateTime() > 0 ? round->GetRoundStateTime() - gameLocal.time : 0 );
+	idPlayer *local = gameLocal.GetLocalPlayer();
+	if ( local != NULL ) {
+		gameLocal.Printf( "MP_LOCAL client=%d entity=%d demo=%d serverDemo=%d repeater=%d spectator=%d fake=%d spectating=%d follow0=%d\n",
+			gameLocal.localClientNum, local->entityNumber, gameLocal.GetDemoState(),
+			gameLocal.IsServerDemoPlaying(), gameLocal.isRepeater, local->spectator,
+			local->IsFakeClient(), local->spectating,
+			mp.CanSpectatorFollow( local->entityNumber, 0 ) );
+	}
+	for ( int slot = 0; slot < gameLocal.numClients && slot < MAX_CLIENTS; ++slot ) {
+		idEntity *entity = gameLocal.entities[ slot ];
+		if ( entity == NULL || !entity->IsType( idPlayer::GetClassType() ) ) {
+			continue;
+		}
+		idPlayer *player = static_cast< idPlayer * >( entity );
+		gameLocal.Printf( "MP_PLAYER slot=%d bot=%d team=%d health=%d spectating=%d wantSpectate=%d ingame=%d score=%d teamScore=%d\n",
+			slot, botManager.IsBot( slot ), player->team, player->health, player->spectating,
+			player->wantSpectate, mp.IsInGame( slot ), mp.GetScore( slot ), mp.GetTeamScore( slot ) );
+		gameLocal.Printf( "MP_POSE slot=%d entity=%s origin=%s hidden=%d\n",
+			slot, player->GetName(), player->GetPhysics()->GetOrigin().ToString( 2 ),
+			player->IsHidden() );
+		if ( gameLocal.isServer && player->spectating ) {
+			for ( int target = 0; target < gameLocal.numClients && target < MAX_CLIENTS; ++target ) {
+				// Live follow authority belongs to the server. A remote client's
+				// local permission query intentionally cannot grant a camera.
+				gameLocal.Printf( "MP_CAMERA observer=%d target=%d allowed=%d following=%d\n",
+					slot, target, mp.CanSpectatorFollow( slot, target ), player->spectator == target );
+			}
+		}
+	}
+	if ( MPGameTypeHasAny( gameLocal.gameType, GTF_FREEZE ) ) {
+		static_cast<rvFreezeTagGameState *>( state )->ReportThawState();
+	}
+	if ( gameLocal.gameType == GAME_TOURNEY ) {
+		rvTourneyGameState *tourney = static_cast<rvTourneyGameState *>( state );
+		for ( int arena = 0; arena < MAX_ARENAS; ++arena ) {
+			rvTourneyArena &bracket = tourney->GetArena( arena );
+			idPlayer **players = bracket.GetPlayers();
+			if ( players[ 0 ] != NULL || players[ 1 ] != NULL ) {
+				gameLocal.Printf( "MP_TOURNEY round=%d arena=%d state=%d first=%d second=%d winner=%d remaining=%d\n",
+					tourney->GetRound(), arena, bracket.GetState(),
+					players[ 0 ] != NULL ? players[ 0 ]->entityNumber : -1,
+					players[ 1 ] != NULL ? players[ 1 ]->entityNumber : -1,
+					bracket.GetWinner() != NULL ? bracket.GetWinner()->entityNumber : -1,
+					bracket.GetNextStateTime() > 0 ? bracket.GetNextStateTime() - gameLocal.time : 0 );
+			}
+		}
+	}
+}
+
+static void OpenQ4ReportMPAnimation( idEntity *entity, const char *surface ) {
+	idAnimator *animator = entity != NULL ? entity->GetAnimator() : NULL;
+	if ( animator == NULL ) {
+		return;
+	}
+	for ( int channel = 0; channel < ANIM_NumAnimChannels; ++channel ) {
+		const idAnimBlend *animation = animator->CurrentAnim( channel );
+		if ( animation != NULL && animation->AnimNum() != 0 ) {
+			gameLocal.Printf( "MP_WORLD_ANIM surface=%s entity=%d channel=%d anim=%d time=%d frame=%d\n",
+				surface, entity->entityNumber, channel, animation->AnimNum(),
+				animation->AnimTime( gameLocal.time ), animation->GetFrameNumber( gameLocal.time ) );
+		}
+	}
+}
+
+static void Cmd_OpenQ4LaunchMPTestProjectile_f( const idCmdArgs &args ) {
+	if ( !gameLocal.isMultiplayer || !gameLocal.isServer ||
+		!gameLocal.CheatsOk( false ) || args.Argc() != 7 ) {
+		gameLocal.Printf( "usage: openq4_launchMPTestProjectile <def> <name> <origin> <direction> <speed> <fuse>\n" );
+		return;
+	}
+	if ( gameLocal.FindEntity( args.Argv( 2 ) ) != NULL ) {
+		gameLocal.Printf( "MP_WORLD_PROJECTILE name already exists\n" );
+		return;
+	}
+	idDict spawn;
+	spawn.Set( "classname", args.Argv( 1 ) );
+	spawn.Set( "name", args.Argv( 2 ) );
+	spawn.Set( "origin", args.Argv( 3 ) );
+	spawn.Set( "direction", args.Argv( 4 ) );
+	spawn.Set( "speed", args.Argv( 5 ) );
+	spawn.Set( "fuse", args.Argv( 6 ) );
+	idVec3 direction = spawn.GetVector( "direction" );
+	if ( direction.Normalize() == 0.0f ) {
+		gameLocal.Printf( "MP_WORLD_PROJECTILE direction must be nonzero\n" );
+		return;
+	}
+	idEntity *entity = NULL;
+	if ( !gameLocal.SpawnEntityDef( spawn, &entity ) || entity == NULL ) {
+		gameLocal.Printf( "MP_WORLD_PROJECTILE spawn failed\n" );
+		return;
+	}
+	if ( !entity->IsType( idProjectile::GetClassType() ) ) {
+		gameLocal.Printf( "MP_WORLD_PROJECTILE definition is not a projectile\n" );
+		entity->PostEventMS( &EV_Remove, 0 );
+		return;
+	}
+	idProjectile *projectile = static_cast<idProjectile *>( entity );
+	const idVec3 origin = spawn.GetVector( "origin" );
+	projectile->Create( gameLocal.GetLocalPlayer(), origin, direction );
+	projectile->Launch( origin, direction, vec3_origin );
+	gameLocal.Printf( "MP_WORLD_PROJECTILE launched name=%s\n", projectile->GetName() );
+}
+
+// Read actual simulation and animation state without moving the camera or
+// injecting player commands. This complements engine render-target captures
+// when qualifying repeated competitive pauses and subsequent resumption.
+static void Cmd_OpenQ4ReportMPWorld_f( const idCmdArgs &args ) {
+	if ( !gameLocal.isMultiplayer || !gameLocal.CheatsOk( false ) || args.Argc() != 2 ) {
+		gameLocal.Printf( "usage: openq4_reportMPWorld <entity name>\n" );
+		return;
+	}
+	idEntity *entity = gameLocal.FindEntity( args.Argv( 1 ) );
+	if ( entity == NULL || entity->GetPhysics() == NULL ) {
+		gameLocal.Printf( "MP_WORLD_MISSING name=%s\n", args.Argv( 1 ) );
+		return;
+	}
+	const idPhysics *physics = entity->GetPhysics();
+	gameLocal.Printf( "MP_WORLD entity=%d name=%s type=%s engine=%d frozen=%d physics=%d hidden=%d health=%d origin=\"%s\" velocity=\"%s\" angles=\"%s\"\n",
+		entity->entityNumber, entity->GetName(), entity->GetClassname(), gameLocal.time,
+		gameLocal.mpGame.IsGameplayFrozen(), physics->GetTime(), entity->IsHidden(), entity->health,
+		physics->GetOrigin().ToString( 4 ), physics->GetLinearVelocity().ToString( 4 ),
+		physics->GetAxis().ToAngles().ToString( 4 ) );
+	OpenQ4ReportMPAnimation( entity, "world" );
+	if ( entity->IsType( idPlayer::GetClassType() ) ) {
+		idPlayer *player = static_cast<idPlayer *>( entity );
+		idVec3 viewOrigin;
+		idMat3 viewAxis;
+		player->GetViewPos( viewOrigin, viewAxis );
+		const renderView_t *view = player->GetRenderView();
+		gameLocal.Printf( "MP_WORLD_VIEW entity=%d think=%d eye=\"%s\" render=\"%s\"\n",
+			entity->entityNumber, entity->thinkFlags, viewOrigin.ToString( 2 ),
+			view != NULL ? view->vieworg.ToString( 2 ) : "unavailable" );
+		for ( int powerup = 0; powerup < POWERUP_MAX; ++powerup ) {
+			if ( ( player->inventory.powerups & ( 1 << powerup ) ) != 0 ) {
+				gameLocal.Printf( "MP_WORLD_POWERUP entity=%d kind=%d remaining=%d\n",
+					entity->entityNumber, powerup,
+					player->inventory.powerupEndTime[ powerup ] - gameLocal.time );
+			}
+		}
+		if ( player->weapon != NULL ) {
+			gameLocal.Printf( "MP_WORLD_WEAPON entity=%d clip=%d ready=%d reloading=%d\n",
+				entity->entityNumber, player->weapon->AmmoInClip(),
+				player->weapon->IsReady(), player->weapon->IsReloading() );
+		}
+		OpenQ4ReportMPAnimation( player->GetWeaponViewModel(), "weapon" );
+	}
+}
+
 static void Cmd_OpenQ4AssertMPClientActive_f( const idCmdArgs &args ) {
 	idPlayer *player = gameLocal.GetLocalPlayer();
 	const bool inGame = player != NULL && gameLocal.mpGame.IsInGame( player->entityNumber );
@@ -3601,6 +3869,51 @@ static void Cmd_OpenQ4AssertMPClientActive_f( const idCmdArgs &args ) {
 		"OPENQ4_STOCK_BASELINE_MP_CLIENT_ACTIVE client=%d spectating=0 wantSpectate=0 ingame=1 menu=0 disableHud=0\n",
 		player->entityNumber
 	);
+}
+
+// Fixed camera verbs and numeric slots keep the reliable request compact and
+// independent of mutable display names. The server revalidates every target.
+static void Cmd_Follow_f( const idCmdArgs &args ) {
+	idPlayer::spectatorFollow_t operation = idPlayer::SPECTATOR_FOLLOW_NEXT;
+	int targetSlot = -1;
+	const char *choice = args.Argv( 1 );
+	if ( !idStr::Icmp( args.Argv( 0 ), "follownext" ) && args.Argc() == 1 ) {
+		choice = "next";
+	} else if ( !idStr::Icmp( args.Argv( 0 ), "followprev" ) && args.Argc() == 1 ) {
+		choice = "prev";
+	} else if ( !idStr::Icmp( args.Argv( 0 ), "followfree" ) && args.Argc() == 1 ) {
+		choice = "free";
+	} else if ( idStr::Icmp( args.Argv( 0 ), "follow" ) || args.Argc() != 2 ) {
+		common->Printf( "%s\n", common->GetLocalizedString( "#str_42880" ) );
+		return;
+	}
+	if ( !idStr::Icmp( choice, "next" ) ) {
+		operation = idPlayer::SPECTATOR_FOLLOW_NEXT;
+	} else if ( !idStr::Icmp( choice, "prev" ) ) {
+		operation = idPlayer::SPECTATOR_FOLLOW_PREV;
+	} else if ( !idStr::Icmp( choice, "free" ) ) {
+		operation = idPlayer::SPECTATOR_FOLLOW_FREE;
+	} else {
+		operation = idPlayer::SPECTATOR_FOLLOW_PLAYER;
+		targetSlot = 0;
+		for ( int i = 0; choice[i]; ++i ) {
+			if ( choice[i] < '0' || choice[i] > '9' || targetSlot >= MAX_CLIENTS ) {
+				targetSlot = -1;
+				break;
+			}
+			targetSlot = targetSlot * 10 + choice[i] - '0';
+		}
+		if ( !choice[0] || targetSlot < 0 || targetSlot >= MAX_CLIENTS ) {
+			common->Printf( "%s\n", common->GetLocalizedString( "#str_42880" ) );
+			return;
+		}
+	}
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( player == NULL ) {
+		common->Printf( "%s\n", common->GetLocalizedString( "#str_42881" ) );
+		return;
+	}
+	player->RequestSpectatorFollow( operation, targetSlot );
 }
 
 /*
@@ -3727,6 +4040,13 @@ void idGameLocal::InitConsoleCommands( void ) {
 	// multiplayer client commands ( replaces old impulses stuff )
 	//cmdSystem->AddCommand( "clientDropWeapon",		idMultiplayerGame::DropWeapon_f, CMD_FL_GAME,			"drop current weapon" );
 	cmdSystem->AddCommand( "clientMessageMode",		idMultiplayerGame::MessageMode_f, CMD_FL_GAME,			"ingame gui message mode" );
+	cmdSystem->AddCommand( "messagemode", idMultiplayerGame::MessageMode_f, CMD_FL_GAME, "open all-player chat" );
+	cmdSystem->AddCommand( "messagemode2", idMultiplayerGame::MessageMode_f, CMD_FL_GAME, "open team chat" );
+	cmdSystem->AddCommand( "say_team", Cmd_SayTeam_f, CMD_FL_GAME, "team text chat" );
+	cmdSystem->AddCommand( "follow", Cmd_Follow_f, CMD_FL_GAME, "spectator camera: follow <next|prev|free|client slot>" );
+	cmdSystem->AddCommand( "follownext", Cmd_Follow_f, CMD_FL_GAME, "follow the next authorized player" );
+	cmdSystem->AddCommand( "followprev", Cmd_Follow_f, CMD_FL_GAME, "follow the previous authorized player" );
+	cmdSystem->AddCommand( "followfree", Cmd_Follow_f, CMD_FL_GAME, "leave player follow for a free spectator camera" );
 	// FIXME: implement
 	cmdSystem->AddCommand( "clientVote",			idMultiplayerGame::Vote_f,	CMD_FL_GAME,				"cast your vote: clientVote yes | no" );
 	cmdSystem->AddCommand( "clientCallVote",		idMultiplayerGame::CallVote_f,	CMD_FL_GAME,			"call a vote: clientCallVote si_.. proposed_value" );
@@ -3765,6 +4085,10 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "matchSeriesBind",		idMultiplayerGame::SeriesBind_f,	CMD_FL_GAME,	"bind a current Duel connection after series recovery: matchSeriesBind <a|b> <client slot>" );
 	cmdSystem->AddCommand( "matchBroadcaster",		idMultiplayerGame::Broadcaster_f,	CMD_FL_GAME,	"grant or revoke broadcaster observation for a current spectator: matchBroadcaster <client slot> <on|off>" );
 	cmdSystem->AddCommand( "openq4_assertMPClientActive", Cmd_OpenQ4AssertMPClientActive_f, CMD_FL_GAME | CMD_FL_CHEAT, "fail validation unless the local multiplayer player is active and not spectating" );
+	cmdSystem->AddCommand( "openq4_reportMPState", Cmd_OpenQ4ReportMPState_f, CMD_FL_GAME | CMD_FL_CHEAT, "report local multiplayer phases, scores and player state to the console" );
+	cmdSystem->AddCommand( "openq4_reportMPWorld", Cmd_OpenQ4ReportMPWorld_f, CMD_FL_GAME | CMD_FL_CHEAT, "report one multiplayer entity's simulation, animation and powerup state" );
+	cmdSystem->AddCommand( "openq4_launchMPTestProjectile", Cmd_OpenQ4LaunchMPTestProjectile_f, CMD_FL_GAME | CMD_FL_CHEAT, "launch a named stock projectile for multiplayer world-clock diagnostics" );
+	cmdSystem->AddCommand( "openq4_matchControl", Cmd_OpenQ4MatchControl_f, CMD_FL_GAME | CMD_FL_CHEAT, "exercise and inspect the local accepted-view Match Control adapter without device input" );
 
 	// localization help commands
 	cmdSystem->AddCommand( "nextGUI",				Cmd_NextGUI_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"teleport the player to the next func_static with a gui" );

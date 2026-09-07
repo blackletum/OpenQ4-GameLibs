@@ -536,10 +536,16 @@ void idTrigger_Multi::Event_Trigger( idEntity *activator ) {
 }
 
 
+static bool IsEligibleDeadZoneController( idPlayer *player, bool requiresToken ) {
+	return player != NULL && player->health > 0 && !player->spectating &&
+		!player->wantSpectate && player->team >= TEAM_MARINE && player->team < TEAM_MAX &&
+		( !requiresToken || player->PowerUpActive( POWERUP_DEADZONE ) );
+}
+
 void idTrigger_Multi::HandleControlZoneTrigger()
 {
 	// This only does something in multiplayer with gameType == DeadZone
-	if ( !gameLocal.isMultiplayer || gameLocal.gameType != GAME_DEADZONE )
+	if ( !gameLocal.isMultiplayer || gameLocal.isClient || gameLocal.gameType != GAME_DEADZONE )
 		return;
 
 	const int TEAM_DEADLOCK = 2;
@@ -547,30 +553,36 @@ void idTrigger_Multi::HandleControlZoneTrigger()
 	int pCount = 0;
 	int count = 0, controllingTeam = TEAM_NONE;
 	count = playersInTrigger.Num();
+	const bool requiresToken = spawnArgs.GetBool( "requiresDeadZonePowerup", "1" );
+	bool haveController = false;
+	bool contested = false;
 
 	for ( int i = 0; i<count; i++ )
 	{
-		// No token? Ignore em!
-		if ( spawnArgs.GetBool("requiresDeadZonePowerup", "1") && !playersInTrigger[i]->PowerUpActive( POWERUP_DEADZONE ) )
+		// Eligibility can change between touch collection and this update.
+		if ( !IsEligibleDeadZoneController( playersInTrigger[ i ], requiresToken ) )
 			continue;
 
-		if ( spawnArgs.GetBool("requiresDeadZonePowerup", "1") )
-		{
-			pCount++;
-		}
+		// Token-free custom zones still accrue one unit per eligible player.
+		pCount++;
 
 		int team = playersInTrigger[i]->team;
 
-		if ( i == 0 )
+		if ( !haveController ) {
 			controllingTeam = playersInTrigger[i]->team;
+			haveController = true;
+		}
 
 		// Assign the controlling team based on the first player
 		// for zones that accept both.
 		if ( team != controllingTeam )
 		{
-			controllingTeam = TEAM_DEADLOCK;
-			pCount = 0;
+			contested = true;
 		}
+	}
+	if ( contested ) {
+		controllingTeam = TEAM_DEADLOCK;
+		pCount = 0;
 	}
 
 	if ( controllingTeam != controlZoneTrigger-1 && controlZoneTrigger != 3 )
@@ -615,8 +627,7 @@ void idTrigger_Multi::HandleControlZoneTrigger()
 	{
 		idPlayer* player = playersInTrigger[i];
 
-		// No token? Ignore em!
-		if ( spawnArgs.GetBool("requiresDeadZonePowerup", "1") && !player->PowerUpActive( POWERUP_DEADZONE ) )
+		if ( !IsEligibleDeadZoneController( player, requiresToken ) )
 			continue;
 
 		int team = player->team;
@@ -694,8 +705,8 @@ void idTrigger_Multi::Event_Touch( idEntity *other, trace_t *trace ) {
 		    // Control zone handling
 		    if ( controlZoneTrigger > 0 ) {
 			    idPlayer *p = static_cast< idPlayer * >( other );
-				if ( p->PowerUpActive(POWERUP_DEADZONE) || !spawnArgs.GetBool("requiresDeadZonePowerup", "1") )
-					playersInTrigger.Append(p);
+				if ( IsEligibleDeadZoneController( p, spawnArgs.GetBool( "requiresDeadZonePowerup", "1" ) ) )
+					playersInTrigger.AddUnique( p );
 		    }
 
 		} else if ( !touchOther ) {

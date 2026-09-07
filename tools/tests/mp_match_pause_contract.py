@@ -433,6 +433,65 @@ int main() {
         subprocess.run([str(executable)], cwd=temp, check=True)
 
 
+def compile_prediction_clock_harness() -> None:
+    """Execute the production clock/rebase delta through snapshot corrections."""
+    prediction = body(read("src/mpgame/Game_network.cpp"),
+                      "gameReturn_t idGameLocal::ClientPrediction")
+    clock = prediction.split("// update the real client time and the new frame flag", 1)[1]
+    clock = clock.split("if ( clientNum == MAX_CLIENTS )", 1)[0]
+    frozen = body(body(prediction, "if ( competitiveGameplayFrozen )"), "if ( isNewFrame )")
+    delta = frozen[frozen.index("const int frameMsec ="):].split(";", 1)[0] + ";"
+    source_text = r'''
+#include <cassert>
+#include <cstdio>
+static int GetMSec() { return 16; }
+static int PausedDelta(int time, int &realClientTime) {
+    bool isNewFrame = false;
+    @CLOCK@
+    if (isNewFrame) { @DELTA@ return frameMsec; }
+    return 0;
+}
+int main() {
+    // Joining or seeking a paused match establishes a fresh clock baseline.
+    for (int initial : {16, 100000}) {
+        int real = 0;
+        assert(PausedDelta(initial, real) == 16);
+        assert(real == initial);
+        assert(PausedDelta(initial, real) == 0);
+        assert(PausedDelta(initial - 16, real) == 0);
+        assert(real == initial);
+        assert(PausedDelta(initial + 16, real) == 16);
+        // A newer snapshot can skip many predicted frames after a stall.
+        assert(PausedDelta(initial + 1040, real) == 1024);
+        assert(real == initial + 1040);
+        assert(PausedDelta(initial + 512, real) == 0);
+        assert(PausedDelta(initial + 1040, real) == 0);
+        assert(PausedDelta(initial + 1056, real) == 16);
+    }
+    int real = 5000, animationStart = 4000, expiry = 9000;
+    for (int clock : {5016, 5016, 5000, 6032, 5600, 6032, 6048, 7072}) {
+        const int delta = PausedDelta(clock, real);
+        animationStart += delta;
+        expiry += delta;
+        assert(real - animationStart == 1000);
+        assert(expiry - real == 4000);
+    }
+    puts("client pause clock: snapshot jumps, replays and initial baselines PASS");
+}
+'''.replace("@CLOCK@", clock).replace("@DELTA@", delta)
+    source_text = "#include <initializer_list>\n" + source_text
+    compiler = shutil.which("clang++") or shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        raise AssertionError("client prediction clock check requires a C++ compiler")
+    with tempfile.TemporaryDirectory(prefix="mp-pause-prediction-", dir=ROOT / ".tmp") as raw:
+        temp = Path(raw)
+        source, executable = temp / "prediction.cpp", temp / "prediction.exe"
+        source.write_text(source_text, encoding="utf-8")
+        subprocess.run([compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+                        str(source), "-o", str(executable)], cwd=temp, check=True)
+        subprocess.run([str(executable)], cwd=temp, check=True)
+
+
 MATCH_CLOCK_HARNESS = r'''
 #include "mpgame/mp/match/MatchSession.h"
 
@@ -635,6 +694,7 @@ def main() -> None:
     central_frame_contracts()
     owned_deadline_contracts()
     compile_deadline_harness()
+    compile_prediction_clock_harness()
     compile_match_clock_harness()
     print("mp_match_pause_contract: ok")
 

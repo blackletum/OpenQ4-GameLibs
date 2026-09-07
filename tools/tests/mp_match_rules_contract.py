@@ -107,6 +107,7 @@ def main() -> None:
         "MP_RULE_TEAM_TIMEOUT_SECONDS",
         "MP_RULE_TIMEOUT_REQUEST_WINDOW",
         "MP_RULE_TIMEOUT_RESUME_POLICY",
+        "MP_RULE_MIN_ACTIVE_PLAYERS",
     ]
     actual_fields = enum_members(header, "MP_RULE_GAME_TYPE", "MP_RULE_FIELD_COUNT")
     if actual_fields != expected_fields:

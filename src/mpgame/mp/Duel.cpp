@@ -33,7 +33,70 @@ void rvDuelGameState::Clear( void ) {
 
 	contenders[ 0 ] = -1;
 	contenders[ 1 ] = -1;
+	previousContenders[ 0 ] = -1;
+	previousContenders[ 1 ] = -1;
+	forfeitingContender = -1;
+	turnoverCancelled = false;
 	queue.Clear();
+}
+
+void rvDuelGameState::PackState( idBitMsg &msg ) {
+	rvGameState::PackState( msg );
+	msg.WriteByte( contenders[ 0 ] < 0 ? 255 : contenders[ 0 ] );
+	msg.WriteByte( contenders[ 1 ] < 0 ? 255 : contenders[ 1 ] );
+}
+
+void rvDuelGameState::SendState( const idMessageSender &sender, int clientNum ) {
+	assert( ( gameLocal.isServer || gameLocal.isRepeater ) && trackPrevious );
+	if ( clientNum == -1 && *this == *previousGameState &&
+		contenders[ 0 ] == previousContenders[ 0 ] &&
+		contenders[ 1 ] == previousContenders[ 1 ] ) {
+		return;
+	}
+	idBitMsg msg;
+	byte buffer[ MAX_GAME_MESSAGE_SIZE ];
+	msg.Init( buffer, sizeof( buffer ) );
+	msg.WriteByte( GAME_RELIABLE_MESSAGE_GAMESTATE );
+	WriteState( msg );
+	sender.Send( msg );
+	if ( clientNum == -1 ) {
+		msg.ReadByte();
+		ReceiveState( msg );
+	}
+}
+
+void rvDuelGameState::ReceiveState( const idBitMsg &msg ) {
+	// The base header is 16 bytes, followed by two contender slots. Decode
+	// into a temporary base state so malformed seats cannot partly change phase.
+	if ( msg.GetRemainingReadBits() != 18 * 8 ) {
+		gameLocal.Warning( "Ignoring malformed Duel state length" );
+		return;
+	}
+	rvGameState decoded( false );
+	if ( !decoded.BaseUnpackState( msg ) ) {
+		return;
+	}
+	const int first = msg.ReadByte();
+	const int second = msg.ReadByte();
+	if ( ( first >= MAX_CLIENTS && first != 255 ) ||
+		( second >= MAX_CLIENTS && second != 255 ) ||
+		( first == second && first != 255 ) ||
+		decoded.GetMPGameState() < INACTIVE || decoded.GetMPGameState() > NEXTGAME ||
+		decoded.GetNextMPGameState() < INACTIVE || decoded.GetNextMPGameState() > NEXTGAME ||
+		decoded.GetNextMPGameStateTime() < 0 || decoded.GetOvertimeMsec() < 0 ||
+		decoded.GetOvertimeStartTime() < 0 ) {
+		gameLocal.Warning( "Ignoring invalid Duel state" );
+		return;
+	}
+	rvGameState::operator=( decoded );
+	contenders[ 0 ] = first == 255 ? -1 : first;
+	contenders[ 1 ] = second == 255 ? -1 : second;
+	if ( gameLocal.localClientNum >= 0 ) {
+		GameStateChanged();
+	}
+	*previousGameState = *this;
+	previousContenders[ 0 ] = contenders[ 0 ];
+	previousContenders[ 1 ] = contenders[ 1 ];
 }
 
 /*
@@ -145,15 +208,36 @@ void rvDuelGameState::RotateLoser( void ) {
 		return;
 	}
 
-	// nobody waiting means the same pair simply plays again
-	if ( queue.Num() == 0 ) {
-		return;
-	}
-
 	first = static_cast< idPlayer * >( gameLocal.entities[ contenders[ 0 ] ] );
 	second = static_cast< idPlayer * >( gameLocal.entities[ contenders[ 1 ] ] );
 
 	if ( first == NULL || second == NULL ) {
+		return;
+	}
+	if ( gameLocal.mpGame.IsManagedMatch() ) {
+		// A validated forfeit retires its actor even while they lead on frags.
+		// An unresolved terminal identity must never become a score-based win.
+		if ( turnoverCancelled || forfeitingContender == -2 ) {
+			return;
+		}
+		const int firstScore = gameLocal.mpGame.GetScore( first );
+		const int secondScore = gameLocal.mpGame.GetScore( second );
+		const int losingSlot = forfeitingContender >= 0 ? forfeitingContender :
+			( firstScore == secondScore ? -1 :
+				( firstScore < secondScore ? contenders[ 0 ] : contenders[ 1 ] ) );
+		if ( gameLocal.mpGame.RotateManagedDuelQueue( contenders[ 0 ],
+			contenders[ 1 ], losingSlot ) ) {
+			for ( int index = 0; index < 2; ++index ) {
+				if ( losingSlot < 0 || contenders[ index ] == losingSlot ) {
+					contenders[ index ] = -1;
+				}
+			}
+		}
+		return;
+	}
+
+	// nobody waiting means the same pair simply plays again
+	if ( queue.Num() == 0 ) {
 		return;
 	}
 
@@ -191,8 +275,13 @@ bool rvDuelGameState::NewState( mpGameState_t newState ) {
 		return true;
 	}
 
-	if ( newState == GAMEREVIEW ) {
+	// Keep both finalists seated throughout review, including on remote HUDs.
+	// NEXTGAME still sees the final scores before warmup resets them.
+	if ( newState == NEXTGAME ) {
 		RotateLoser();
+	} else if ( newState == WARMUP ) {
+		forfeitingContender = -1;
+		turnoverCancelled = false;
 	}
 	return true;
 }

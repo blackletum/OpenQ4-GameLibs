@@ -9182,6 +9182,13 @@ observed lag, which is the boundary itself.
 ================
 */
 float idGameLocal::GetPresentationTicFraction( void ) const {
+	// Stop-time keeps the last simulation sample, but real time still advances.
+	// Re-anchoring that unchanged sample every maxDrift interval would cycle
+	// movers between their previous and current poses, repeatedly invalidating
+	// shadow depth and visibly shifting doors while their physics is frozen.
+	if ( !isMultiplayer && g_stopTime.GetBool() ) {
+		return 1.0f;
+	}
 	// Real seconds per authoritative tic.  Distinct from GetMSec(), which is how
 	// much *game* time a tic adds -- an exact 1000/Hz against an integer 16 at
 	// 60Hz.  Dividing the elapsed real time by the game figure is what used to
@@ -9227,7 +9234,7 @@ Maps the engine's presentation clock onto the current simulation snapshot.
 ================
 */
 int idGameLocal::GetPresentationTimeMsec( void ) const {
-	if ( GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
+	if ( ( !isMultiplayer && g_stopTime.GetBool() ) || GetDemoState() == DEMO_PLAYING || IsTimeDemo() ) {
 		return time;
 	}
 

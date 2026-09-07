@@ -2054,11 +2054,58 @@ void Cmd_Damage_f( const idCmdArgs &args ) {
 
 /*
 ==================
-Cmd_Flashlight_f
+Cmd_TestFlashlight_f
 
-Toggles flashlight on specified entity
+Sets the current player's weapon flashlight for renderer validation.
 ==================
 */
+static void Cmd_TestFlashlight_f( const idCmdArgs &args ) {
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( gameLocal.IsMultiplayer() || player == NULL || !gameLocal.CheatsOk( false ) ) {
+		return;
+	}
+	if ( args.Argc() != 2 || ( idStr::Cmp( args.Argv( 1 ), "0" ) != 0 && idStr::Cmp( args.Argv( 1 ), "1" ) != 0 ) ) {
+		gameLocal.Printf( "usage: testFlashlight <0 = off, 1 = on> (current weapon)\n" );
+		return;
+	}
+	// Exercise the real weapon light without queuing a player input impulse.
+	player->Flashlight( atoi( args.Argv( 1 ) ) != 0 );
+}
+
+// Drive the real binary mover and portal lifecycle without player input or
+// replacing its physics pose. Status includes every leaf of a paired door.
+static void Cmd_TestDoor_f( const idCmdArgs &args ) {
+	if ( gameLocal.IsMultiplayer() || gameLocal.GetLocalPlayer() == NULL || !gameLocal.CheatsOk( false ) ) {
+		return;
+	}
+	if ( args.Argc() < 2 || args.Argc() > 3 || ( args.Argc() == 3
+			&& idStr::Icmp( args.Argv( 2 ), "open" ) != 0
+			&& idStr::Icmp( args.Argv( 2 ), "close" ) != 0 ) ) {
+		gameLocal.Printf( "usage: testDoor <entity name> [open|close] (omit action for status)\n" );
+		return;
+	}
+	idEntity *entity = gameLocal.FindEntity( args.Argv( 1 ) );
+	if ( entity == NULL || !entity->IsType( idDoor::Type ) ) {
+		gameLocal.Printf( "testDoor: entity not found or not a door\n" );
+		return;
+	}
+	idDoor *door = static_cast<idDoor *>( entity );
+	if ( args.Argc() == 3 ) {
+		if ( idStr::Icmp( args.Argv( 2 ), "open" ) == 0 ) {
+			door->Open();
+		} else {
+			door->Close();
+		}
+	}
+	for ( idMover_Binary *leaf = door->GetMoveMaster(); leaf != NULL; leaf = leaf->GetActivateChain() ) {
+		const qhandle_t portal = leaf->GetAreaPortal();
+		gameLocal.Printf( "testDoor: name=%s time=%d state=%d origin=(%s) velocity=(%s) portal=%d blocking=%d\n",
+			leaf->name.c_str(), gameLocal.time, leaf->GetMoverState(),
+			leaf->GetPhysics()->GetOrigin().ToString( 3 ), leaf->GetPhysics()->GetLinearVelocity().ToString( 3 ),
+			portal, portal != 0 ? gameRenderWorld->GetPortalState( portal ) : -1 );
+	}
+}
+
 void Cmd_Flashlight_f( const idCmdArgs &args ) {
 	if ( gameLocal.IsMultiplayer() || !gameLocal.GetLocalPlayer() || !gameLocal.CheatsOk( false ) ) {
 		return;
@@ -4200,6 +4247,8 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "listLines",				Cmd_ListDebugLines_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"lists all debug lines" );
 	cmdSystem->AddCommand( "playerModel",			Cmd_PlayerModel_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"sets the given model on the player", idCmdSystem::ArgCompletion_Decl<DECL_MODELDEF> );
 	cmdSystem->AddCommand( "actorFlashlight",		Cmd_Flashlight_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"toggle actor's flashlight", idGameLocal::ArgCompletion_AIName );
+	cmdSystem->AddCommand( "testFlashlight", Cmd_TestFlashlight_f, CMD_FL_GAME|CMD_FL_CHEAT, "set the current single-player weapon flashlight for rendering tests", idCmdSystem::ArgCompletion_Boolean );
+	cmdSystem->AddCommand( "testDoor", Cmd_TestDoor_f, CMD_FL_GAME|CMD_FL_CHEAT, "inspect or move a single-player door team for rendering tests", idGameLocal::ArgCompletion_EntityName );
 	
 	cmdSystem->AddCommand( "shuffleTeams",			Cmd_ShuffleTeams_f,			CMD_FL_GAME,				"shuffle teams" );
 // RAVEN BEGIN
@@ -4271,6 +4320,9 @@ void idGameLocal::InitConsoleCommands( void ) {
 	// multiplayer client commands ( replaces old impulses stuff )
 	//cmdSystem->AddCommand( "clientDropWeapon",		idMultiplayerGame::DropWeapon_f, CMD_FL_GAME,			"drop current weapon" );
 	cmdSystem->AddCommand( "clientMessageMode",		idMultiplayerGame::MessageMode_f, CMD_FL_GAME,			"ingame gui message mode" );
+	cmdSystem->AddCommand( "messagemode", idMultiplayerGame::MessageMode_f, CMD_FL_GAME, "open all-player chat" );
+	cmdSystem->AddCommand( "messagemode2", idMultiplayerGame::MessageMode_f, CMD_FL_GAME, "open team chat" );
+	cmdSystem->AddCommand( "say_team", Cmd_SayTeam_f, CMD_FL_GAME, "team text chat" );
 	// FIXME: implement
 	cmdSystem->AddCommand( "clientVote",			idMultiplayerGame::Vote_f,	CMD_FL_GAME,				"cast your vote: clientVote yes | no" );
 	cmdSystem->AddCommand( "clientCallVote",		idMultiplayerGame::CallVote_f,	CMD_FL_GAME,			"call a vote: clientCallVote si_.. proposed_value" );

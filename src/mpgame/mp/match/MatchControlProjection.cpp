@@ -176,13 +176,13 @@ int MPMatchControlSanitizeDisplayText( const char *source,
 
 #if !defined( MP_MATCH_CONTROL_PROJECTION_SANITIZER_STANDALONE_TEST )
 
-static_assert( MP_MATCH_VIEW_SCHEMA_VERSION == 3,
+static_assert( MP_MATCH_VIEW_SCHEMA_VERSION == 4,
 	"Match Control projection requires an explicit view-schema review" );
 static_assert( MP_MATCH_OP_COUNT == 37,
 	"Match Control availability projection requires an opcode review" );
 static_assert( MP_MATCH_VIEW_ROLE_COUNT == 6,
 	"Match Control role presentation requires an explicit mapping review" );
-static_assert( MP_MATCH_BLOCKER_COUNT == 11,
+static_assert( MP_MATCH_BLOCKER_COUNT == 12,
 	"Match Control readiness presentation requires a blocker review" );
 
 namespace {
@@ -296,6 +296,19 @@ static const char *OperationLabel( mpMatchOperationOpcode_t opcode ) {
 	return Localized( descriptor != NULL ?
 		MPMatchControlLocalizationKey( descriptor->labelLocalizationId ) :
 		"#str_42301" );
+}
+
+static const char *MatchSideKey( const mpSessionView &view, int side ) {
+	const mpMatchViewCommittedRules_t &rules = view.publicState.committedRules;
+	for ( int index = 0; rules.present && index < rules.valueCount &&
+		index < MP_MATCH_VIEW_MAX_RULE_FIELDS; ++index ) {
+		if ( rules.values[ index ].fieldId == MP_RULE_GAME_TYPE &&
+			rules.values[ index ].value == GAME_DUEL ) {
+			return side == 0 ? "#str_42652" :
+				( side == 1 ? "#str_42653" : SideKey( side, true ) );
+		}
+	}
+	return SideKey( side, true );
 }
 
 static const char *AvailabilityReason(
@@ -495,7 +508,7 @@ static void BuildPauseText( char *destination, int destinationBytes,
 	if ( lifecycle.pauseState != MP_MATCH_VIEW_PAUSE_RUNNING ) {
 		AppendSeparator( text );
 		text.Append( lifecycle.pauseOwnerSide == 0 || lifecycle.pauseOwnerSide == 1 ?
-			Localized( SideKey( lifecycle.pauseOwnerSide ) ) :
+			Localized( MatchSideKey( view, lifecycle.pauseOwnerSide ) ) :
 			Localized( "#str_41779" ) );
 	}
 	const unsigned long long nowMsec = ProjectionNow( view, context );
@@ -511,6 +524,13 @@ static void BuildPauseText( char *destination, int destinationBytes,
 static void BuildReadinessText( char *destination, int destinationBytes,
 	const mpSessionView &view ) {
 	mpProjectionText text( destination, destinationBytes );
+	// Readiness describes admission to the next countdown. The session clears
+	// ready flags when play starts; showing those as blockers during the match
+	// incorrectly tells players that their running match cannot begin.
+	if ( view.publicState.lifecycle.phase != WARMUP &&
+		view.publicState.lifecycle.phase != COUNTDOWN ) {
+		return;
+	}
 	const mpMatchViewReadiness_t &readiness = view.publicState.readiness;
 	text.Append( Localized( "#str_41708" ) );
 	text.Append( ": " );
@@ -547,7 +567,7 @@ static void BuildReadinessText( char *destination, int destinationBytes,
 		if ( ( readiness.blockers & MPMatchReadinessBlockerBit( value ) ) == 0 ) {
 			continue;
 		}
-		text.Append( firstBlocker ? " | " : ", " );
+		text.Append( firstBlocker ? " | " : " " );
 		text.Append( Localized( MPMatchControlReadinessBlockerKey( value ) ) );
 		firstBlocker = false;
 	}
@@ -562,7 +582,7 @@ static void BuildTimeoutText( char *destination, int destinationBytes,
 		if ( side > 0 ) {
 			AppendSeparator( text );
 		}
-		text.Append( Localized( SideKey( side ) ) );
+		text.Append( Localized( MatchSideKey( view, side ) ) );
 		text.Append( " " );
 		text.AppendUInt( view.publicState.timeoutBudgets[ side ].remaining );
 		text.Append( "/" );
@@ -578,9 +598,15 @@ static void BuildRecipientText( char *destination, int destinationBytes,
 	text.Append( ": " );
 	AppendPublicRoles( text, recipient.publicRoleMask );
 	AppendSeparator( text );
-	text.Append( Localized( SideKey( recipient.side, true ) ) );
-	AppendSeparator( text );
-	text.Append( Localized( recipient.ready ? "#str_41711" : "#str_41712" ) );
+	text.Append( Localized( MatchSideKey( view,
+		recipient.side == MP_MATCH_VIEW_SIDE_NONE && recipient.active ?
+			recipient.competitionSide : recipient.side ) ) );
+	if ( recipient.active &&
+		( view.publicState.lifecycle.phase == WARMUP ||
+		  view.publicState.lifecycle.phase == COUNTDOWN ) ) {
+		AppendSeparator( text );
+		text.Append( Localized( recipient.ready ? "#str_41711" : "#str_41712" ) );
+	}
 	if ( recipient.queueState != MP_MATCH_VIEW_QUEUE_NONE ) {
 		AppendSeparator( text );
 		text.Append( Localized( MPMatchControlQueueStateKey(
@@ -839,7 +865,6 @@ static void BuildResultText( char *destination, int destinationBytes,
 	}
 	const mpMatchOperationResult_t *result = context.authoritativeResult;
 	if ( result == NULL || result->sessionId != view.publicState.sessionId ) {
-		text.Append( Localized( "#str_41770" ) );
 		return;
 	}
 	text.Append( OperationLabel( result->opcode ) );
@@ -857,6 +882,36 @@ static void BuildResultText( char *destination, int destinationBytes,
 	}
 }
 
+static void BuildLastResultText( char *destination, int destinationBytes,
+	const mpMatchViewTerminalResult_t &result ) {
+	mpProjectionText text( destination, destinationBytes );
+	if ( result.outcome == MP_MATCH_VIEW_RESULT_NONE ) {
+		return;
+	}
+	char outcome[ 512 ];
+	mpProjectionText outcomeText( outcome, sizeof( outcome ) );
+	if ( result.outcome == MP_MATCH_VIEW_RESULT_ABORTED ) {
+		outcomeText.Append( Localized( "#str_42870" ) );
+	} else if ( result.outcome == MP_MATCH_VIEW_RESULT_DRAW ) {
+		outcomeText.Append( Localized( "#str_42871" ) );
+	} else if ( result.winnerSide == 0 || result.winnerSide == 1 ) {
+		outcomeText.Append( Localized( result.winnerSide == 0 ? "#str_201012" : "#str_201013" ) );
+	} else {
+		// The accepted result owns this name. A current roster lookup could
+		// silently substitute a renamed winner or a new occupant of their slot.
+		char winner[ 384 ];
+		idStr::snPrintf( winner, sizeof( winner ), Localized( "#str_41313" ), result.winnerName );
+		outcomeText.Append( winner );
+	}
+	if ( result.outcome == MP_MATCH_VIEW_RESULT_FORFEIT ) {
+		AppendSeparator( outcomeText );
+		outcomeText.Append( Localized( "#str_41315" ) );
+	}
+	char line[ 768 ];
+	idStr::snPrintf( line, sizeof( line ), Localized( "#str_42873" ), outcome );
+	text.Append( line );
+}
+
 static void BuildStatusLines( char *destination, int destinationBytes,
 	const mpSessionView &view,
 	const mpMatchControlProjectionContext_t &context ) {
@@ -865,15 +920,23 @@ static void BuildStatusLines( char *destination, int destinationBytes,
 	char pause[ 512 ];
 	char recipient[ 512 ];
 	char timeouts[ 384 ];
+	char lastResult[ 768 ];
 	BuildPhaseText( phase, sizeof( phase ), view );
+	BuildLastResultText( lastResult, sizeof( lastResult ), view.publicState.terminalResult );
 	BuildReadinessText( readiness, sizeof( readiness ), view );
 	BuildPauseText( pause, sizeof( pause ), view, context );
 	BuildRecipientText( recipient, sizeof( recipient ), view );
 	BuildTimeoutText( timeouts, sizeof( timeouts ), view );
 	mpProjectionText text( destination, destinationBytes );
 	text.Append( phase );
-	text.Append( "\n" );
-	text.Append( readiness );
+	if ( lastResult[ 0 ] != '\0' ) {
+		text.Append( "\n" );
+		text.Append( lastResult );
+	}
+	if ( readiness[ 0 ] != '\0' ) {
+		text.Append( "\n" );
+		text.Append( readiness );
+	}
 	text.Append( "\n" );
 	text.Append( pause );
 	text.Append( "\n" );
@@ -945,12 +1008,8 @@ static void BuildReplacementRowText( char *destination, int destinationBytes,
 	char participantName[ MP_MATCH_CONTROL_PROJECTION_NAME_BYTES ];
 	ResolveParticipantText( context, row.participantId, participantName );
 	text.Append( participantName );
-	text.Append( "\t" );
-	text.Append( Localized( SideKey( row.side, true ) ) );
-	text.Append( "\t" );
-	text.Append( Localized( row.rostered ?
-		MPMatchControlRosterRoleKey( row.rosterRole ) :
-		MPMatchControlPublicRoleKey( MP_MATCH_VIEW_ROLE_PLAYER ) ) );
+	// This narrow selector chooses a participant; side and role are shown in
+	// the adjacent roster table and remain in the structured selection model.
 }
 
 static void BuildProposalTemplateRowText( char *destination, int destinationBytes,
@@ -1012,9 +1071,9 @@ static void BuildSeriesHistoryRowText( char *destination, int destinationBytes,
 		const mpMatchViewSeriesMap_t *map = FindSeriesMap( series,
 			row.veto.mapPoolIndex );
 		ResolveMapText( context, map != NULL ? map->mapToken : NULL, mapName );
-		text.Append( Localized( MPMatchControlVetoActionKey( row.veto.action ) ) );
-		text.Append( "\t" );
 		text.Append( mapName );
+		text.Append( "\t" );
+		text.Append( Localized( MPMatchControlVetoActionKey( row.veto.action ) ) );
 		text.Append( "\t" );
 		text.Append( Localized( SideKey( row.veto.actingSide ) ) );
 		if ( row.veto.hasSelectedGameSide ) {
@@ -1266,10 +1325,13 @@ static void ProjectAvailability( idUserInterface &gui,
 	}
 }
 
-static void InitializeChoiceStates( idUserInterface &gui ) {
+static void InitializeChoiceStates( idUserInterface &gui,
+	const mpMatchViewSeriesSummary_t *series = NULL ) {
 	gui.SetStateString( "match_role_choice", "1" );
 	gui.SetStateString( "match_proposal_scope_choice", "global" );
-	gui.SetStateString( "match_series_profile_choice", "best_of_three" );
+	const int bestOf = series != NULL && series->present ? series->bestOf : 3;
+	gui.SetStateString( "match_series_profile_choice", bestOf == 1 ?
+		"best_of_one" : bestOf == 5 ? "best_of_five" : "best_of_three" );
 	gui.SetStateString( "match_rule_value", "" );
 }
 
@@ -1336,7 +1398,7 @@ void mpMatchControlProjectionContext_s::Clear( void ) {
 void MPMatchControlClearMenu( idUserInterface &gui, bool initializeChoices ) {
 	gui.SetStateInt( "match_surface_available", 0 );
 	static const char *const scalarStates[] = {
-		"match_phase", "match_status_lines", "match_ready_action",
+		"match_phase", "match_phase_short", "match_status_lines", "match_ready_action",
 		"match_team_lock_action", "match_broadcaster_action",
 		"match_action_side_label", "match_action_side_0_label",
 		"match_action_side_1_label",
@@ -1374,12 +1436,14 @@ void MPMatchControlProjectMenu( idUserInterface &gui,
 		return;
 	}
 	if ( context.initializeChoices ) {
-		InitializeChoiceStates( gui );
+		InitializeChoiceStates( gui, &acceptedView.publicState.series );
 	}
 
 	char value[ PROJECTION_TEXT_BYTES ];
 	BuildPhaseText( value, sizeof( value ), acceptedView );
 	gui.SetStateString( "match_phase", value );
+	gui.SetStateString( "match_phase_short", Localized(
+		MPMatchControlPhaseKey( acceptedView.publicState.lifecycle.phase ) ) );
 	BuildStatusLines( value, sizeof( value ), acceptedView, context );
 	gui.SetStateString( "match_status_lines", value );
 	gui.SetStateString( "match_ready_action", Localized(

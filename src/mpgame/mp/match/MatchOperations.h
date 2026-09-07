@@ -147,6 +147,9 @@ typedef struct mpOperationAdapterContext_s {
 
 	mpProposalRevision_t expectedProposalRevision;
 	uint64_t expectedSeriesRevision;
+	// A validated completed-map checkpoint restored into a new warmup session.
+	// This is server-owned context, never a client request argument.
+	bool seriesReviewRecovered;
 
 	mpOperationAdapterContext_s( void );
 } mpOperationAdapterContext_t;

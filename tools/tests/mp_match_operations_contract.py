@@ -144,7 +144,7 @@ def static_contracts(header: str, source: str) -> None:
         "MP_SERIES_REASON_PROFILE_BEST_OF_MISMATCH",
         "MPOperationMapProtocolCompetitionSide",
         "MP_MATCH_ARG_COMPETITION_SIDE",
-        "phase != GAMEREVIEW || series.GetState() != MP_SERIES_MAP_COMPLETE",
+        "phase != GAMEREVIEW && !recoveredReview",
     ):
         require(combined, token, "typed adapter continuations")
 
@@ -241,6 +241,13 @@ static void InitDescriptors( void ) {
     SetDescriptor( MP_MATCH_OP_RULES_DISCARD, MP_MATCH_PROTOCOL_CAP_RULES_STAGE,
         MP_MATCH_PHASE_WARMUP | MP_MATCH_PHASE_GAMEREVIEW | MP_MATCH_PHASE_NEXTGAME,
         0, MP_MATCH_COOLDOWN_PRIVILEGED );
+    SetDescriptor( MP_MATCH_OP_TIMEOUT_REQUEST, MP_MATCH_PROTOCOL_CAP_TIMEOUT_TEAM,
+        MP_MATCH_PHASE_COUNTDOWN | MP_MATCH_PHASE_GAMEON | MP_MATCH_PHASE_SUDDENDEATH,
+        MP_MATCH_OPERATION_FLAG_ALLOW_TEAM_TARGET | MP_MATCH_OPERATION_FLAG_REQUIRE_TEAM_TARGET,
+        MP_MATCH_COOLDOWN_TEAM_ACTION );
+    SetDescriptor( MP_MATCH_OP_RESUME_REQUEST, MP_MATCH_PROTOCOL_CAP_RESUME,
+        MP_MATCH_PHASE_COUNTDOWN | MP_MATCH_PHASE_GAMEON | MP_MATCH_PHASE_SUDDENDEATH,
+        MP_MATCH_OPERATION_FLAG_PROPOSABLE, MP_MATCH_COOLDOWN_TEAM_ACTION );
     SetDescriptor( MP_MATCH_OP_SERIES_START, MP_MATCH_PROTOCOL_CAP_SERIES_MANAGE,
         MP_MATCH_PHASE_WARMUP, 0, MP_MATCH_COOLDOWN_PRIVILEGED );
     SetDescriptor( MP_MATCH_OP_SERIES_ADVANCE, MP_MATCH_PROTOCOL_CAP_SERIES_MANAGE,
@@ -694,7 +701,87 @@ static mpOperationAdapterContext_t MakeContext( const mpCompetitiveRules &rules,
     return context;
 }
 
+static int DuelTimeouts( void ) {
+    for ( int mode = 0; mode < 2; ++mode )
+    for ( int granted = 0; granted < 2; ++granted )
+    for ( int active = 0; active < 2; ++active )
+    for ( int side = -1; side <= 2; ++side ) {
+        mpMatchSession session;
+        CHECK( session.Reset( 42, mpMatchEngineTime::FromMilliseconds( 0 ) ) );
+        CHECK( session.TransitionPhase( WARMUP, MP_MATCH_TRANSITION_SESSION_INITIALIZED,
+            mpParticipantId::Invalid(), session.GetSessionRevision() ).WasApplied() );
+        mpParticipantId player;
+        CHECK( session.BindParticipant( 0, true, MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ),
+            session.GetSessionRevision(), player ).WasApplied() );
+        unsigned int generation = 0;
+        CHECK( session.GetSlotGeneration( 0, generation ) );
+        CHECK( !session.SetParticipantActive( player, active != 0,
+            session.GetSessionRevision() ).WasRejected() );
+        CHECK( session.ConfigureTimeouts( 2, 60000, true, 500,
+            MP_MATCH_RESUME_OWNER_OR_AUTHORITY, session.GetSessionRevision() ).WasApplied() );
+        CHECK( session.FreezeRules( 1, 0x1001, session.GetSessionRevision() ).WasApplied() );
+        CHECK( session.TransitionPhase( COUNTDOWN, MP_MATCH_TRANSITION_READY_GATE,
+            mpParticipantId::Invalid(), session.GetSessionRevision() ).WasApplied() );
+        CHECK( session.TransitionPhase( GAMEON, MP_MATCH_TRANSITION_COUNTDOWN_COMPLETE,
+            mpParticipantId::Invalid(), session.GetSessionRevision() ).WasApplied() );
+        mpCompetitiveRules rules;
+        mpProposalService proposals;
+        mpCompetitionSeries series;
+        mpMatchOperationExecutor executor;
+        mpOperationAdapterContext_t context = MakeContext( rules, proposals, series );
+        context.ruleGameType = mode ? GAME_DUEL : GAME_DM;
+        context.actorCompetitionContestant = granted != 0;
+        context.actorCompetitionSide = side;
+        mpMatchOperationRequest_t timeout = MakeRequest( MP_MATCH_OP_TIMEOUT_REQUEST, session, generation );
+        timeout.hasTeamTarget = true;
+        timeout.teamTarget = side == 1 ? MP_MATCH_TEAM_STROGG : MP_MATCH_TEAM_MARINE;
+        const Fingerprint before = Snapshot( session, rules, proposals, series );
+        const bool permitted = mode && granted && active && side >= 0 && side < 2;
+        if ( permitted ) {
+            mpMatchOperationRequest_t opponent = timeout;
+            opponent.teamTarget = side == 0 ? MP_MATCH_TEAM_STROGG : MP_MATCH_TEAM_MARINE;
+            CHECK( executor.Execute( opponent, context, session, rules, proposals, series ).reason ==
+                MP_OPERATION_REASON_TARGET_ALIGNMENT );
+            CHECK( Same( before, Snapshot( session, rules, proposals, series ) ) );
+        }
+        mpOperationExecutionResult_t result = executor.Execute( timeout, context,
+            session, rules, proposals, series );
+        if ( !permitted ) {
+            CHECK( result.reason == MP_OPERATION_REASON_NOT_AUTHORIZED );
+            CHECK( Same( before, Snapshot( session, rules, proposals, series ) ) );
+            continue;
+        }
+        CHECK( result.outcome == MP_OPERATION_APPLIED );
+        CHECK( session.GetPause().ownerSide == side );
+        CHECK( session.AdvanceFrame( mpMatchEngineTime::FromMilliseconds( 10 ) ).WasApplied() );
+        CHECK( session.GetPause().state == MP_MATCH_PAUSED );
+        CHECK( session.GetTimeoutBudget( side ).remaining == 1 );
+        CHECK( session.GetTimeoutBudget( 1 - side ).remaining == 2 );
+        mpMatchOperationRequest_t resume = MakeRequest( MP_MATCH_OP_RESUME_REQUEST, session, generation );
+        context.actorCompetitionSide = 1 - side;
+        const Fingerprint paused = Snapshot( session, rules, proposals, series );
+        CHECK( executor.Execute( resume, context, session, rules, proposals, series ).outcome ==
+            MP_OPERATION_REJECTED );
+        CHECK( Same( paused, Snapshot( session, rules, proposals, series ) ) );
+        context.actorCompetitionSide = side;
+        context.actorCompetitionContestant = false;
+        CHECK( executor.Execute( resume, context, session, rules, proposals, series ).reason ==
+            MP_OPERATION_REASON_NOT_AUTHORIZED );
+        CHECK( Same( paused, Snapshot( session, rules, proposals, series ) ) );
+        context.actorCompetitionContestant = true;
+        CHECK( executor.Execute( resume, context, session, rules, proposals, series ).outcome ==
+            MP_OPERATION_APPLIED );
+        CHECK( session.GetPause().state == MP_MATCH_RESUME_COUNTDOWN );
+        CHECK( session.AdvanceFrame( mpMatchEngineTime::FromMilliseconds( 511 ) ).WasApplied() );
+        CHECK( session.GetPause().state == MP_MATCH_PAUSE_RUNNING );
+        CHECK( session.FindParticipant( player )->roles == MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ) );
+        CHECK( session.ValidateInvariants() );
+    }
+    return 0;
+}
+
 int main( void ) {
+    CHECK( DuelTimeouts() == 0 );
     mpMatchSession session;
     CHECK( session.Reset( 0x123456789ULL, mpMatchEngineTime::FromMilliseconds( 0 ) ) );
     CHECK( session.TransitionPhase( WARMUP, MP_MATCH_TRANSITION_SESSION_INITIALIZED,
@@ -1241,6 +1328,17 @@ int main( void ) {
         proposals, nextMapSeries );
     CHECK( result.reason == MP_OPERATION_REASON_SERIES_STATE );
     CHECK( nextMapSeries.GetRevision() == beforeNextMapRevision );
+
+    // Only a validated restored review permits a completed-map checkpoint
+    // to advance from a new warmup. The adapter preflight remains immutable.
+    context.seriesReviewRecovered = true;
+    result = executor.Execute( advance, context, session, rules,
+        proposals, nextMapSeries );
+    CHECK( result.outcome == MP_OPERATION_NEEDS_ADAPTER );
+    CHECK( result.continuation.kind ==
+        MP_OPERATION_CONTINUATION_SERIES_ADVANCE_AND_LOAD_MAP );
+    CHECK( nextMapSeries.GetRevision() == beforeNextMapRevision &&
+        nextMapSeries.GetState() == MP_SERIES_MAP_COMPLETE );
 
     const char *bestOfOneMaps[] = { "mp/q4dm1" };
     mpCompetitionSeries completeSeries;

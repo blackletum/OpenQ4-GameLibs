@@ -279,8 +279,16 @@ public:
  		EVENT_SPECTATE,
 		EVENT_EMOTE,
 		EVENT_JUMP,
+		EVENT_SPECTATOR_FOLLOW,
  		EVENT_MAXEVENTS
  	};
+
+	enum spectatorFollow_t {
+		SPECTATOR_FOLLOW_NEXT,
+		SPECTATOR_FOLLOW_PREV,
+		SPECTATOR_FOLLOW_FREE,
+		SPECTATOR_FOLLOW_PLAYER
+	};
 
 	friend class idThread;
 
@@ -535,6 +543,7 @@ public:
  	float					CalcFov( bool honorZoom );
 	void					CalculateViewWeaponPos( idVec3 &origin, idMat3 &axis, const idVec3 *viewOriginOverride = NULL, const idMat3 *viewAxisOverride = NULL );
 	void					GetViewPos( idVec3 &origin, idMat3 &axis ) const;
+	void					UpdateEyeHeight( bool snap );
  	void					OffsetThirdPersonView( float angle, float range, float height, bool clip );
 	void					OffsetThirdPersonVehicleView( bool clip );
 	bool					OffsetThirdPersonTargetView( void );
@@ -637,6 +646,8 @@ public:
 	int						GetItemCost(const char* itemName);
 	void					PerformImpulse( int impulse );
 	void					Spectate( bool spectate, bool force = false );
+	void					SpectateFreeFly( bool force );	// force is also used by offline demo controls
+	void					RequestSpectatorFollow( spectatorFollow_t operation, int targetSlot = -1 );
  	void					ToggleObjectives ( void );
  	void					ToggleScoreboard( void );
 	void					RouteGuiMouse( idUserInterface *gui );
@@ -1076,8 +1087,9 @@ private:
 	void					Weapon_GUI( void );
 	void					Weapon_Vehicle ( void );
 	void					Weapon_Usable ( void );
-	void					SpectateFreeFly( bool force );	// ignore the timeout to force when followed spec is no longer valid
 	void					SpectateCycle( void );
+	bool					CycleSpectatorFollow( int direction );
+	void					ServerSpectatorFollow( int operation, int targetSlot, int targetSpawnId );
 	idAngles				GunTurningOffset( void );
 	idVec3					GunAcceleratingOffset( void );
 

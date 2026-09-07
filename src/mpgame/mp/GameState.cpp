@@ -589,7 +589,10 @@ void rvGameState::Run( void ) {
 				// tourney always needs a warmup, to ensure that at least 2 players get seeded for the tournament.
 				// Keep the legal lifecycle edge even when the presentation countdown
 				// is disabled. The next frame consumes this zero-length countdown.
-				if ( NewState( COUNTDOWN ) ) {
+				// Empty or bot-only practice servers still need an active human;
+				// wait quietly instead of rejecting an atomic start every frame.
+				if ( gameLocal.mpGame.CanCommitMatchPhaseTransition( COUNTDOWN ) &&
+						NewState( COUNTDOWN ) ) {
 					nextState = GAMEON;
 					nextStateTime = gameLocal.time;
 				}
@@ -620,9 +623,15 @@ bool rvGameState::NewState( mpGameState_t newState ) {
 	if ( !gameLocal.mpGame.CommitMatchPhaseTransition( newState ) ) {
 		return false;
 	}
+	common->DPrintf( "MP match phase: %d -> %d at %d\n", currentState, newState, gameLocal.time );
 	
 	switch( newState ) {
 		case WARMUP: {
+			// A cancelled countdown or completed match must not lend its timers
+			// to the next warmup, including restarts on the same map.
+			nextState = INACTIVE;
+			nextStateTime = 0;
+			fragLimitTimeout = 0;
 			//	asalmon: start the stat manager as soon as the game starts
 			statManager->Init();
 			statManager->BeginGame();
@@ -653,8 +662,17 @@ bool rvGameState::NewState( mpGameState_t newState ) {
 
 			break;
 		}
+		case COUNTDOWN: {
+			// Every accepted entry, including a typed referee/operator force-ready,
+			// owns its start deadline. Run's automatic warmup path is only one
+			// caller and cannot be the sole place that schedules live play.
+			nextState = GAMEON;
+			nextStateTime = gameLocal.time + 1000 * gameLocal.serverInfo.GetInt( "si_countDown" );
+			break;
+		}
 		case GAMEON: {
 			// allow damage in warmup
+			fragLimitTimeout = 0;
 			//gameLocal.mpGame.EnableDamage( true );
 			gameLocal.LocalMapRestart();
 // RITUAL BEGIN
@@ -832,7 +850,9 @@ bool rvGameState::NewState( mpGameState_t newState ) {
 			// Mark everyone tied for the lead as leaders
 			i = 0;
 			idPlayer* leader = gameLocal.mpGame.GetRankedPlayer( i );
-			if( leader ) {
+			if ( !gameLocal.IsTeamGame() && gameLocal.gameType != GAME_TOURNEY ) {
+				gameLocal.mpGame.FragLeader();
+			} else if( leader ) {
 				int highScore = gameLocal.mpGame.GetScore( leader );
 				while( leader ) {
 					if( gameLocal.mpGame.GetScore( leader ) < highScore ) {
@@ -1109,16 +1129,14 @@ void rvDMGameState::Run( void ) {
 				//
 				// jshepard: OR it means that the winner killed himself during the fraglimit delay, and the
 				// game needs to roll on.
-				if( tiedForFirst ) {
-					//this is a tie...
-					if( leadingScore >= gameLocal.serverInfo.GetInt( "si_fragLimit" ) )	{
-						// openQ4: tied at the frag limit.  Extend the match the
-						// way Quake Live does; fall back to Quake 4 sudden
-						// death only when the server has overtime turned off.
-						if ( !StartOvertime() ) {
-							NewState( SUDDENDEATH );
-						}
+				if ( tiedForFirst && gameLocal.serverInfo.GetInt( "si_fragLimit" ) > 0 &&
+					leadingScore >= gameLocal.serverInfo.GetInt( "si_fragLimit" ) ) {
+					if ( gameLocal.time <= fragLimitTimeout ) {
+						break;
 					}
+					// A score-limit tie is decided by the next lead. Timed
+					// overtime belongs to expiry of the match clock below.
+					NewState( SUDDENDEATH );
 				}
 				//otherwise, just keep playing as normal.
 				fragLimitTimeout = 0;
@@ -1183,12 +1201,12 @@ void rvTeamDMGameState::Run( void ) {
 
 	switch( currentState ) {
 		case GAMEON: {
-			int team = ( ( gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) >= gameLocal.serverInfo.GetInt( "si_fragLimit" ) ) ? TEAM_MARINE : ( ( gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG ) >= gameLocal.serverInfo.GetInt( "si_fragLimit" ) ) ? TEAM_STROGG : -1 ) );
-			if( gameLocal.serverInfo.GetInt( "si_fragLimit" ) <= 0 ) {
-				// no fraglimit
-				team = -1;
-			}
-			bool tiedForFirst = gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) == gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG );
+			const int marineScore = gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE );
+			const int stroggScore = gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG );
+			const int limit = gameLocal.serverInfo.GetInt( "si_fragLimit" );
+			const int leadingTeam = marineScore >= stroggScore ? TEAM_MARINE : TEAM_STROGG;
+			const int team = limit > 0 && Max( marineScore, stroggScore ) >= limit ? leadingTeam : -1;
+			const bool tiedForFirst = marineScore == stroggScore;
 			if ( team >= 0 && !tiedForFirst ) {
 				if ( !fragLimitTimeout ) {
 					common->DPrintf( "enter FragLimit timeout, team %d is leader\n", team );
@@ -1206,14 +1224,11 @@ void rvTeamDMGameState::Run( void ) {
 				//
 				// jshepard: OR it means that the winner killed himself during the fraglimit delay, and the
 				// game needs to roll on.
-				if( tiedForFirst )	{
-					//this is a tie
-					if( gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) >= gameLocal.serverInfo.GetInt( "si_fragLimit" ) )	{
-						//and it's tied at the fraglimit.
-						if ( !StartOvertime() ) {
-							NewState( SUDDENDEATH );
-						}
+				if ( tiedForFirst && team >= 0 ) {
+					if ( gameLocal.time <= fragLimitTimeout ) {
+						break;
 					}
+					NewState( SUDDENDEATH );
 				}
 				// openQ4: this used to be cleared only on the tied branch, so a
 				// leader who suicided during FRAGLIMIT_DELAY left the timeout
@@ -1622,12 +1637,12 @@ void rvCTFGameState::Run( void ) {
 
 	switch( currentState ) {
 		case GAMEON: {
-			int team = ( ( gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) >= gameLocal.serverInfo.GetInt( "si_captureLimit" ) ) ? TEAM_MARINE : ( ( gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG ) >= gameLocal.serverInfo.GetInt( "si_captureLimit" ) ) ? TEAM_STROGG : -1 ) );
-			if( gameLocal.serverInfo.GetInt( "si_captureLimit" ) <= 0 ) {
-				// no capture limit games
-				team = -1;
-			}
-			bool tiedForFirst = gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) == gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG );
+			const int marineScore = gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE );
+			const int stroggScore = gameLocal.mpGame.GetScoreForTeam( TEAM_STROGG );
+			const int limit = gameLocal.serverInfo.GetInt( "si_captureLimit" );
+			const int leadingTeam = marineScore >= stroggScore ? TEAM_MARINE : TEAM_STROGG;
+			const int team = limit > 0 && Max( marineScore, stroggScore ) >= limit ? leadingTeam : -1;
+			const bool tiedForFirst = marineScore == stroggScore;
 			if ( team >= 0 && !tiedForFirst ) {
 				if ( !fragLimitTimeout ) {
 					common->DPrintf( "enter capture limit timeout, team %d is leader\n", team );
@@ -1643,10 +1658,11 @@ void rvCTFGameState::Run( void ) {
 				// frag limit was hit and cancelled. means the two teams got even during FRAGLIMIT_DELAY
 				// enter sudden death, the next frag leader will win
 				// OR the winner lost a point in the frag delay, and there's no tie, so no one wins, game on.
-				if( tiedForFirst && ( gameLocal.mpGame.GetScoreForTeam( TEAM_MARINE ) >= gameLocal.serverInfo.GetInt( "si_captureLimit" ) ))	{
-					if ( !StartOvertime() ) {
-						NewState( SUDDENDEATH );
+				if ( tiedForFirst && team >= 0 ) {
+					if ( gameLocal.time <= fragLimitTimeout ) {
+						break;
 					}
+					NewState( SUDDENDEATH );
 				}
 				fragLimitTimeout = 0;
 			} else if ( gameLocal.mpGame.MercyLimitHit() >= 0 ) {
@@ -2292,7 +2308,9 @@ void rvTourneyGameState::PackState( idBitMsg& outMsg ) {
 
 	if( round != ((rvTourneyGameState*)previousGameState)->round ) {
 		outMsg.WriteByte( MSG_TOURNEY_ROUND );
-		outMsg.WriteByte( round );
+		// -1 is the reset sentinel; WriteChar keeps its existing 0xff wire
+		// representation without overflowing the unsigned-byte writer.
+		outMsg.WriteChar( round );
 	}
 
 	if( maxRound != ((rvTourneyGameState*)previousGameState)->maxRound ) {

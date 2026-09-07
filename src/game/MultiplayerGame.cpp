@@ -875,6 +875,7 @@ void idMultiplayerGame::Reset() {
 	PACIFIER_UPDATE;
 	msgmodeGui = uiManager->FindGui( "guis/mpmsgmode.gui", true, false, true );
 	msgmodeGui->SetStateBool( "gameDraw", true );
+	msgmodeGui->HandleNamedEvent( "chatReset" );
 
 	memset ( lights, 0, sizeof( lights ) );
 	memset ( lightHandles, -1, sizeof( lightHandles ) );
@@ -4660,11 +4661,10 @@ const char* idMultiplayerGame::HandleGuiCommands( const char *_menuCommand ) {
 			const char* text;
 			text = currentGui->State().GetString( "chattext" );
 			if ( *text ) {
-				if ( mode ) {
-					cmdSystem->BufferCommandText( CMD_EXEC_NOW, va( "sayTeam \"%s\"", text ) );
-				} else {
-					cmdSystem->BufferCommandText( CMD_EXEC_NOW, va( "say \"%s\"", text ) );
-				}
+				idCmdArgs chatCommand;
+				chatCommand.AppendArg( mode ? "sayTeam" : "say" );
+				chatCommand.AppendArg( text );
+				cmdSystem->BufferCommandArgs( CMD_EXEC_NOW, chatCommand );
 			}
 // RAVEN BEGIN		
 			currentGui->SetStateString(	"chattext",	"" );
@@ -5908,26 +5908,16 @@ void idMultiplayerGame::AddChatLine( const char *fmt, ... ) {
 	temp.StripTrailingOnce( "\n" );
 	gameLocal.Printf( "%s\n", temp.c_str() );
 
-	// Push the chat line to the MP HUD chat history widget.
-	if ( gameLocal.GetLocalPlayer() != NULL && gameLocal.GetLocalPlayer()->mphud ) {
-		gameLocal.GetLocalPlayer()->mphud->SetStateString( "chattext", temp.c_str() );
-		gameLocal.GetLocalPlayer()->mphud->HandleNamedEvent( "addchatline" );
+	if ( msgmodeGui ) {
+		msgmodeGui->SetStateString( "chatline", temp.c_str() );
+		msgmodeGui->SetStateBool( "chatteam", false );
+		msgmodeGui->HandleNamedEvent( "chatLine" );
 	}
 
-	if ( chatHistory.Length() + temp.Length() > CHAT_HISTORY_SIZE ) {
-		int removeLength = chatHistory.Find( '\n' );
-		if ( removeLength == -1 ) {
-			chatHistory.Empty();
-		} else {
-			while ( ( chatHistory.Length() - removeLength ) + temp.Length() > CHAT_HISTORY_SIZE ) {
-				removeLength = chatHistory.Find( '\n', removeLength + 1 );
-				if ( removeLength == -1 ) {
-					chatHistory.Empty();
-					break;
-				}
-			}
-		}
-		chatHistory = chatHistory.Right( chatHistory.Length() - removeLength );
+	while ( !chatHistory.IsEmpty() && chatHistory.Length() + temp.Length() + 1 > CHAT_HISTORY_SIZE ) {
+		const int newline = chatHistory.Find( '\n' );
+		if ( newline < 0 ) { chatHistory.Clear(); break; }
+		chatHistory = chatHistory.Mid( newline + 1, chatHistory.Length() - newline - 1 );
 	}
 
 	chatHistory.Append( temp );
@@ -5945,7 +5935,7 @@ void idMultiplayerGame::AddChatLine( const char *fmt, ... ) {
 		if ( gameLocal.IsTeamGame() ) {
 			int i = temp.Find( gameLocal.GetLocalPlayer()->team ? "Strogg" : "Marine", false );
 			int firstColon = temp.Find( ":" );
-			if ( firstColon >= 0 && i < firstColon && i >= 1 && temp[ i - 6 ] == '(' ) {
+			if ( firstColon >= 0 && i < firstColon && i >= 6 && temp[ i - 6 ] == '(' ) {
 				chatSound = "snd_teamchat";
 			}
 		}
@@ -6586,13 +6576,14 @@ void idMultiplayerGame::MessageMode( const idCmdArgs &args ) {
 		common->Printf( "no local client\n" );
 		return;
 	}
-	mode = args.Argv( 1 );
+	mode = !idStr::Icmp( args.Argv( 0 ), "messagemode2" ) ? "1" : args.Argv( 1 );
 	if ( !mode[ 0 ] || !gameLocal.IsTeamGame() ) {
 		imode = 0;
 	} else {
 		imode = atoi( mode );
 	}
 	msgmodeGui->SetStateString( "messagemode", imode ? "1" : "0" );
+	msgmodeGui->SetStateBool( "chatTeamAvailable", gameLocal.IsTeamGame() );
 	msgmodeGui->SetStateString( "chattext", "" );
 	nextMenu = 2;
 	// let the session know that we want our ingame main menu opened

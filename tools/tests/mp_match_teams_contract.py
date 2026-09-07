@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,7 +66,7 @@ def static_contracts(header: str, source: str) -> None:
         "invitation->target != participant",
         "invitation->side != requestedSide",
         "invitation->role != seat->role",
-        "candidate.RemoveExpiredInvitations( engineNow )",
+        "candidate.RemoveExpiredInvitations( session, engineNow )",
         "candidate.RemoveQueueAt( queuePosition )",
         "candidate.RemoveInvitationAt( invitationIndex )",
         "PlansEqual( plan, current.plan )",
@@ -108,6 +109,17 @@ def static_contracts(header: str, source: str) -> None:
 
 HARNESS = r'''
 #include "mpgame/mp/match/MatchTeams.h"
+#include "mpgame/mp/match/MatchProtocol.h"
+
+static const mpMatchPhaseMask_t PHASE_LOBBY = MP_MATCH_PHASE_WARMUP |
+	MP_MATCH_PHASE_GAMEREVIEW | MP_MATCH_PHASE_NEXTGAME;
+static const mpMatchPhaseMask_t PHASE_LIVE = MP_MATCH_PHASE_COUNTDOWN |
+	MP_MATCH_PHASE_GAMEON | MP_MATCH_PHASE_SUDDENDEATH;
+static const mpMatchPhaseMask_t PHASE_INTERACTIVE = PHASE_LOBBY | PHASE_LIVE;
+static const mpMatchPhaseMask_t acceptancePhases = @ROSTER_ACCEPT_PHASES@;
+static const mpMatchPhaseMask_t assignmentPhases = @ROLE_ASSIGN_PHASES@;
+static const mpMatchPhaseMask_t substitutionPhases = @ROSTER_SUBSTITUTE_PHASES@;
+static const mpMatchPhaseMask_t withdrawalPhases = @ROSTER_LEAVE_PHASES@;
 
 #define CHECK( condition ) do { if ( !( condition ) ) { return __LINE__; } } while ( 0 )
 
@@ -253,7 +265,157 @@ static bool ApplyPlanToSessionCopy( mpMatchSession &session,
 	return session.ValidateInvariants();
 }
 
+static int InvitationAuthorityAndPhases() {
+	mpMatchSession session;
+	CHECK( InitializeSession( session, 0x300000001ull, true, 100 ) );
+	mpParticipantId captain, bench, target, authority;
+	CHECK( Bind( session, 0, captain ) );
+	CHECK( Bind( session, 1, bench ) );
+	CHECK( Bind( session, 2, target ) );
+	CHECK( Bind( session, 3, authority ) );
+	CHECK( SessionApplied( session.SetParticipantSide( captain, 0, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.SetParticipantRoles( captain,
+		MPMatchPrincipalRolesForRosterRole( MP_MATCH_ROSTER_CAPTAIN ), session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.SetParticipantActive( captain, true, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.SetParticipantSide( bench, 0, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.SetParticipantRoles( bench, 0, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.DeclareRosterSeat( 0, 0, MP_MATCH_ROSTER_CAPTAIN,
+		true, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.DeclareRosterSeat( 1, 0, MP_MATCH_ROSTER_SUBSTITUTE,
+		false, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.DeclareRosterSeat( 2, 0, MP_MATCH_ROSTER_PLAYER,
+		false, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.AssignRosterSeat( 0, captain, session.GetSessionRevision() ) ) );
+	CHECK( SessionApplied( session.AssignRosterSeat( 1, bench, session.GetSessionRevision() ) ) );
+	mpMatchTeams teams;
+	const mpMatchEngineTime now = mpMatchEngineTime::FromMilliseconds( 100 );
+	CHECK( teams.Reset( session.GetSessionId(), now ) );
+	mpMatchTeamsPolicy_t policy = TeamPolicy();
+	CHECK( TeamsApplied( teams.SetSideLocked( session, 0, true, teams.GetRevision() ) ) );
+	mpMatchRosterInvitationId_t invitation = 0;
+	CHECK( TeamsApplied( teams.IssueRosterInvitation( session, target, 0,
+		MP_MATCH_ROSTER_PLAYER, captain, 1000, now, teams.GetRevision(), invitation ) ) );
+	CHECK( teams.PlanRosterInvitationAcceptance( session, target, invitation, policy, now ).IsAllowed() );
+	mpMatchTeamsRecipientSnapshot_t view;
+	CHECK( teams.BuildRecipientSnapshot( session, target, now, view ) && view.invitationCount == 1 );
+
+	// Demotion, activity loss and switching sides all withdraw the old captain's
+	// grant before acceptance, projection or another invitation can use it.
+	for ( int loss = 0; loss < 3; ++loss ) {
+		mpMatchSession changed = session;
+		CHECK( SessionApplied( changed.VacateRosterSeat( 0, changed.GetSessionRevision() ) ) );
+		if ( loss == 0 ) {
+			CHECK( SessionApplied( changed.SetParticipantRoles( captain,
+				MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ), changed.GetSessionRevision() ) ) );
+		} else if ( loss == 1 ) {
+			CHECK( SessionApplied( changed.SetParticipantActive( captain, false, changed.GetSessionRevision() ) ) );
+		} else {
+			CHECK( SessionApplied( changed.SetParticipantSide( captain, 1, changed.GetSessionRevision() ) ) );
+		}
+		const uint64_t revision = teams.GetRevision();
+		CHECK( teams.PlanRosterInvitationAcceptance( changed, target, invitation, policy, now ).reason ==
+			MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
+		CHECK( teams.BuildRecipientSnapshot( changed, target, now, view ) && view.invitationCount == 0 );
+		mpMatchRosterInvitationId_t rejected = 99;
+		CHECK( teams.IssueRosterInvitation( changed, target, 0, MP_MATCH_ROSTER_PLAYER,
+			captain, 1000, now, revision, rejected ).reason == MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
+		CHECK( rejected == 0 && teams.GetRevision() == revision );
+	}
+
+	// A real persistent captain/bench swap leaves the former captain connected,
+	// but its invitation disappears and its reservation is released permanently.
+	mpMatchSession swappedSession = session;
+	mpMatchTeams swappedTeams = teams;
+	const mpMatchTeamsJoinDecision_t swap = swappedTeams.PlanSubstitution(
+		swappedSession, captain, bench, 0, 0, policy, now );
+	CHECK( swap.IsAllowed() && swap.plan.IsPersistentBenchSwap() );
+	CHECK( TeamsApplied( swappedTeams.CommitTransactionPlan( swap.plan, swappedSession,
+		policy, now, swappedTeams.GetRevision() ) ) );
+	CHECK( ApplyPlanToSessionCopy( swappedSession, swap.plan ) );
+	CHECK( swappedTeams.PlanRosterInvitationAcceptance( swappedSession, target,
+		invitation, policy, now ).reason == MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
+	CHECK( swappedTeams.BuildRecipientSnapshot( swappedSession, target, now, view ) && view.invitationCount == 0 );
+	CHECK( TeamsApplied( swappedTeams.ExpireRosterInvitations( swappedSession, now, swappedTeams.GetRevision() ) ) );
+	CHECK( swappedTeams.FindInvitation( invitation ) == NULL );
+	mpMatchRosterInvitationId_t replacementInvite = 0;
+	CHECK( TeamsApplied( swappedTeams.IssueRosterInvitation( swappedSession, target, 0,
+		MP_MATCH_ROSTER_PLAYER, bench, 1000, now, swappedTeams.GetRevision(), replacementInvite ) ) );
+	CHECK( replacementInvite != invitation && swappedTeams.PlanRosterInvitationAcceptance(
+		swappedSession, target, replacementInvite, policy, now ).IsAllowed() );
+
+	// Referees must retain that current role. Only an explicitly operator-issued
+	// invitation can outlive role changes, and it still cannot outlive its binding.
+	for ( int operatorGrant = 0; operatorGrant < 2; ++operatorGrant ) {
+		mpMatchSession granted = session;
+		mpMatchTeams grants;
+		CHECK( grants.Reset( session.GetSessionId(), now ) );
+		if ( !operatorGrant ) {
+			CHECK( SessionApplied( granted.SetParticipantRoles( authority,
+				MPMatchRoleBit( MP_MATCH_ROLE_REFEREE ), granted.GetSessionRevision() ) ) );
+		}
+		mpMatchRosterInvitationId_t grantedId = 0;
+		CHECK( TeamsApplied( grants.IssueRosterInvitation( granted, target, 0,
+			MP_MATCH_ROSTER_PLAYER, authority, 1000, now, grants.GetRevision(), grantedId, operatorGrant != 0 ) ) );
+		CHECK( grants.PlanRosterInvitationAcceptance( granted, target, grantedId, policy, now ).IsAllowed() );
+		CHECK( !granted.SetParticipantRoles( authority, MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ),
+			granted.GetSessionRevision() ).WasRejected() );
+		CHECK( grants.PlanRosterInvitationAcceptance( granted, target, grantedId, policy, now ).IsAllowed() == ( operatorGrant != 0 ) );
+		uint32_t generation = 0;
+		CHECK( granted.GetSlotGeneration( 3, generation ) );
+		CHECK( SessionApplied( granted.UnbindParticipant( 3, generation, granted.GetSessionRevision() ) ) );
+		mpParticipantId replacement;
+		CHECK( Bind( granted, 3, replacement ) && replacement != authority );
+		CHECK( grants.PlanRosterInvitationAcceptance( granted, target, grantedId, policy, now ).reason ==
+			MP_MATCH_TEAMS_REASON_INVITATION_ISSUER_STALE );
+		CHECK( grants.BuildRecipientSnapshot( granted, target, now, view ) && view.invitationCount == 0 );
+	}
+
+	// Use the production descriptor phase expressions with the real team/session
+	// implementations. Review never advertises a transition the session rejects.
+	CHECK( SessionApplied( session.FreezeRules( 1, 1, session.GetSessionRevision() ) ) );
+	for ( int phase = WARMUP; phase <= NEXTGAME; ++phase ) {
+		if ( phase == SUDDENDEATH ) { continue; }
+		if ( phase != WARMUP ) {
+			const mpMatchTransitionReason_t reason = phase == COUNTDOWN ? MP_MATCH_TRANSITION_READY_GATE :
+				phase == GAMEON ? MP_MATCH_TRANSITION_COUNTDOWN_COMPLETE :
+				phase == GAMEREVIEW ? MP_MATCH_TRANSITION_LIMIT_REACHED : MP_MATCH_TRANSITION_REVIEW_COMPLETE;
+			CHECK( SessionApplied( session.TransitionPhase( static_cast<mpGameState_t>( phase ), reason,
+				mpParticipantId::Invalid(), session.GetSessionRevision() ) ) );
+		}
+		const mpMatchTeamsJoinDecision_t accept = teams.PlanRosterInvitationAcceptance(
+			session, target, invitation, policy, now );
+		const mpMatchTeamsJoinDecision_t substitute = teams.PlanSubstitution(
+			session, captain, bench, 0, 0, policy, now );
+		CHECK( accept.IsAllowed() == ( ( acceptancePhases & ( 1u << phase ) ) != 0 ) );
+		CHECK( substitute.IsAllowed() == ( ( substitutionPhases & ( 1u << phase ) ) != 0 ) );
+		CHECK( ( ( assignmentPhases & ( 1u << phase ) ) != 0 ) == ( phase == WARMUP ) );
+		if ( accept.IsAllowed() || substitute.IsAllowed() ) {
+			mpMatchSession candidate = session;
+			CHECK( ApplyPlanToSessionCopy( candidate, accept.IsAllowed() ? accept.plan : substitute.plan ) );
+		}
+		if ( phase == GAMEREVIEW || phase == NEXTGAME ) {
+			CHECK( accept.reason == MP_MATCH_TEAMS_REASON_WRONG_PHASE );
+			CHECK( substitute.reason == MP_MATCH_TEAMS_REASON_WRONG_PHASE );
+			const uint64_t revision = session.GetSessionRevision();
+			CHECK( session.SetParticipantActive( target, true, revision ).reason == MP_MATCH_REASON_WRONG_PHASE );
+			CHECK( session.SetParticipantSide( target, 0, revision ).reason == MP_MATCH_REASON_WRONG_PHASE );
+			CHECK( session.AssignRosterSeat( 2, target, revision ).reason == MP_MATCH_REASON_WRONG_PHASE );
+			CHECK( session.GetSessionRevision() == revision );
+		}
+		CHECK( ( withdrawalPhases & ( 1u << phase ) ) != 0 && session.CanSelfLeaveRoster( bench ) );
+		mpMatchSession withdrawn = session;
+		CHECK( SessionApplied( withdrawn.VacateRosterSeat( 1, withdrawn.GetSessionRevision() ) ) );
+		CHECK( SessionApplied( withdrawn.SetParticipantRoles( bench,
+			MPMatchRoleBit( MP_MATCH_ROLE_PLAYER ), withdrawn.GetSessionRevision() ) ) );
+		CHECK( !withdrawn.SetParticipantActive( bench, false, withdrawn.GetSessionRevision() ).WasRejected() );
+		CHECK( SessionApplied( withdrawn.SetParticipantSide( bench, MP_MATCH_SIDE_NONE, withdrawn.GetSessionRevision() ) ) );
+	}
+	return 0;
+}
+
 int main() {
+	const int authorityResult = InvitationAuthorityAndPhases();
+	if ( authorityResult != 0 ) { return authorityResult; }
 	mpMatchRoleMask_t mappedRoles = 0;
 	const mpMatchRoleMask_t refereeRole = MPMatchRoleBit( MP_MATCH_ROLE_REFEREE );
 	CHECK( !MPMatchTeamsAssignRosterRole(
@@ -279,6 +441,8 @@ int main() {
 	mpParticipantId observer;
 	mpParticipantId bench;
 	CHECK( Bind( session, 0, issuer ) );
+	CHECK( SessionApplied( session.SetParticipantRoles( issuer, refereeRole,
+		session.GetSessionRevision() ) ) );
 	CHECK( Bind( session, 1, outgoing ) );
 	CHECK( Bind( session, 2, incoming ) );
 	CHECK( Bind( session, 3, other ) );
@@ -470,7 +634,7 @@ int main() {
 		teamPolicy, mpMatchEngineTime::FromMilliseconds( 130 ),
 		teams.GetRevision() ) ) );
 	const mpMatchTeamsRevision_t beforeClockSample = teams.GetRevision();
-	CHECK( teams.ExpireRosterInvitations( teamSessionId,
+	CHECK( teams.ExpireRosterInvitations( session,
 		mpMatchEngineTime::FromMilliseconds( 135 ), teams.GetRevision() ).code ==
 		MP_MATCH_TEAMS_MUTATION_NO_CHANGE );
 	CHECK( teams.GetRevision() == beforeClockSample );
@@ -492,11 +656,11 @@ int main() {
 	CHECK( teams.PlanRosterInvitationAcceptance( session, other, expiringId,
 		teamPolicy, mpMatchEngineTime::FromMilliseconds( 150 ) ).reason ==
 		MP_MATCH_TEAMS_REASON_INVITATION_EXPIRED );
-	CHECK( TeamsApplied( teams.ExpireRosterInvitations( teamSessionId,
+	CHECK( TeamsApplied( teams.ExpireRosterInvitations( session,
 		mpMatchEngineTime::FromMilliseconds( 150 ), teams.GetRevision() ) ) );
 	CHECK( teams.FindInvitation( expiringId ) == 0 );
 	const mpMatchTeamsRevision_t beforeClockRegression = teams.GetRevision();
-	CHECK( teams.ExpireRosterInvitations( teamSessionId,
+	CHECK( teams.ExpireRosterInvitations( session,
 		mpMatchEngineTime::FromMilliseconds( 149 ), teams.GetRevision() ).reason ==
 		MP_MATCH_TEAMS_REASON_CLOCK_REGRESSION );
 	CHECK( teams.GetRevision() == beforeClockRegression );
@@ -651,7 +815,19 @@ def executable_contract() -> None:
         temp_dir = Path(temp)
         harness = temp_dir / "match_teams_contract.cpp"
         executable = temp_dir / "match_teams_contract.exe"
-        harness.write_text(HARNESS, encoding="utf-8")
+        harness_text = HARNESS
+        protocol = read(MATCH_DIR / "MatchProtocol.cpp")
+        for operation in ("ROSTER_ACCEPT", "ROLE_ASSIGN", "ROSTER_SUBSTITUTE", "ROSTER_LEAVE"):
+            descriptor = re.search(
+                rf"\{{\s*MP_MATCH_OP_{operation},(.*?)\}},",
+                protocol,
+                re.DOTALL,
+            )
+            if descriptor is None:
+                raise AssertionError(f"missing production descriptor phases for {operation}")
+            phases = descriptor[1].split(",")[4].strip()
+            harness_text = harness_text.replace(f"@{operation}_PHASES@", phases)
+        harness.write_text(harness_text, encoding="utf-8")
 
         msvc = locate_msvc()
         if msvc is not None:

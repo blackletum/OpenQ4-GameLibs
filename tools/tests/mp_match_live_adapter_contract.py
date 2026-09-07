@@ -49,14 +49,10 @@ def main() -> None:
     require(player, "if ( managedMatch )", "managed spectator-policy bypass")
     require(multiplayer, 'serverInfo.SetBool( "si_managedMatch"',
             "client-visible managed match marker")
-    # Durable intent, not the physical spectate state - death and elimination
-    # both set the latter. Duel is the one exception: everybody past the two
-    # contenders is held in spectator by the game state rather than by choice,
-    # so counting them active makes the warmup ready threshold a vote of people
-    # who can neither play nor ready.
+    # Managed Duel keeps accepted admission before the gameplay seats catch up.
+    # The native userinfo contract exercises both stale and newly admitted seats.
     require(multiplayer,
-            "playerState[ clientNum ].ingame && !player->wantSpectate &&\n"
-            "\t\t!( gameLocal.gameType == GAME_DUEL && player->spectating );",
+        "const bool active = acceptedDuel != NULL ? acceptedDuel->active :",
             "durable participation intent")
     if "!player->wantSpectate &&\n\t\t!player->spectating" in multiplayer:
         raise AssertionError("transient death spectating still withdraws managed participants")

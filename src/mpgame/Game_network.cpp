@@ -126,10 +126,16 @@ void idGameLocal::InitLocalClient( int clientNum ) {
 	localClientNum = clientNum;
 
 	if ( clientNum == MAX_CLIENTS && !entities[ ENTITYNUM_NONE ] ) {
+		const int restoreFollowClient = GetDemoFollowClient();
 		SpawnPlayer( ENTITYNUM_NONE );
 		idPlayer *player = gameLocal.GetLocalPlayer();
 		assert( player );
 		player->SpawnFromSpawnSpot();
+		// World restarts recreate the offline viewer while keeping real client
+		// slots. Restore its selected POV before prediction publishes free view.
+		if ( !SetDemoFollowClient( restoreFollowClient ) ) {
+			SetDemoFollowClient( -1 );
+		}
 	}
 }
 
@@ -1387,8 +1393,8 @@ void idGameLocal::ServerProcessEntityNetworkEventQueue( void ) {
 			NetworkEventWarning( event, "Entity does not exist any longer, or has not been spawned yet." );
 		// openQ4: the spawnId came off the wire.  Every client->server event is
 		// sent by an entity for itself - idEntity::ClientSendEvent always writes
-		// gameLocal.GetSpawnId( this ), and the only senders are idPlayer's own
-		// EVENT_IMPULSE and EVENT_EMOTE - so an event naming any other entity is
+		// gameLocal.GetSpawnId( this ), and player input, emote and spectator
+		// follow requests all name that player - so any other entity is
 		// a forged spawn id.  Without this check a modified client can drive
 		// PerformImpulse on any other player.
 		} else if ( event->sender >= 0 && ( event->sender >= MAX_CLIENTS || entPtr.GetEntity() != entities[ event->sender ] ) ) {
@@ -2312,26 +2318,54 @@ idGameLocal::SetDemoFollowClient
 ===============
 */
 bool idGameLocal::SetDemoFollowClient( int clientNum ) {
-	if ( !IsServerDemoPlaying() || clientNum < -1 || clientNum >= MAX_CLIENTS ) {
+	if ( !IsServerDemoPlaying() || isServer || !isClient || isRepeater ||
+		IsRepeaterDemoPlaying() || localClientNum != MAX_CLIENTS ||
+		clientNum < DEMO_FOLLOW_NEXT || clientNum >= MAX_CLIENTS ) {
 		return false;
 	}
 
 	idPlayer *localPlayer = GetLocalPlayer();
-	if ( localPlayer == NULL || !localPlayer->IsFakeClient() ) {
+	if ( localPlayer == NULL || !localPlayer->IsFakeClient() ||
+		localPlayer->entityNumber != ENTITYNUM_NONE || !localPlayer->spectating ) {
 		return false;
+	}
+
+	if ( clientNum == DEMO_FOLLOW_NEXT ) {
+		int candidate = GetDemoFollowClient();
+		clientNum = DEMO_FOLLOW_FREE;
+		for ( int attempt = 0; attempt < MAX_CLIENTS; ++attempt ) {
+			candidate = ( candidate + 1 ) % MAX_CLIENTS;
+			if ( mpGame.CanSpectatorFollow( localPlayer->entityNumber, candidate ) ) {
+				clientNum = candidate;
+				break;
+			}
+		}
 	}
 
 	idPlayer *target = NULL;
 	if ( clientNum >= 0 ) {
+		// Restoring a saved target can occur before the new round's snapshot
+		// makes it active again. Eligibility gates explicit cycling above and
+		// is rechecked by UpdateSpectating before that POV is presented.
 		if ( entities[ clientNum ] == NULL || !entities[ clientNum ]->IsType( idPlayer::GetClassType() ) ) {
 			return false;
 		}
 		target = static_cast< idPlayer * >( entities[ clientNum ] );
 	}
+	if ( target == NULL && localPlayer->spectator != localPlayer->entityNumber ) {
+		// Leave follow at the viewed player's position, as live free-fly does.
+		localPlayer->SpectateFreeFly( true );
+	}
 
 	followPlayer = clientNum;
 	localPlayer->spectating = true;
 	localPlayer->spectator = target != NULL ? clientNum : localPlayer->entityNumber;
+
+	if ( target != NULL ) {
+		// A seek skips the prediction frames that normally blend crouch height.
+		// Present the recorded stance immediately, even while playback is paused.
+		target->UpdateEyeHeight( true );
+	}
 
 	if ( target != NULL && localPlayer->GetInstance() != target->GetInstance() ) {
 		localPlayer->SetInstance( target->GetInstance() );
@@ -2562,8 +2596,8 @@ void idGameLocal::ClientProcessReliableMessage( int clientNum, const idBitMsg &m
 	}
 	id = msg.ReadByte();
 	if ( id < GAME_RELIABLE_MESSAGE_SPAWN_PLAYER ||
-		 id > GAME_RELIABLE_MESSAGE_MATCH_AUTH_CHALLENGE ) {
-		common->Warning( "Ignoring invalid server-demo reliable message %d", id );
+		 id >= GAME_RELIABLE_MESSAGE_COUNT ) {
+		common->Warning( "Ignoring invalid reliable game message %d", id );
 		return;
 	}
 
@@ -2738,6 +2772,22 @@ void idGameLocal::ClientProcessReliableMessage( int clientNum, const idBitMsg &m
 		}
 		case GAME_RELIABLE_MESSAGE_RESTART: {
 			MapRestart();
+			break;
+		}
+		case GAME_RELIABLE_MESSAGE_ROUNDRESTART: {
+			// The full restart recreates the gametype state. Between rounds that
+			// loses the current phase/round and replays match-start presentation.
+			// This payload-free message only restarts the world, as on the server.
+			rvGameState *state = mpGame.GetGameState();
+			if ( msg.GetRemainingReadBits() != 0 ||
+				!MPGameTypeHasAny( gameType, GTF_ROUND ) || state == NULL ||
+				state->GetMPGameState() != GAMEON ) {
+				Warning( "Ignoring invalid round world restart" );
+				break;
+			}
+			LocalMapRestart();
+			common->DPrintf( "MP round world restart: gametype=%d phase=%d statePreserved=%d\n",
+				gameType, mpGame.GetGameState()->GetMPGameState(), mpGame.GetGameState() == state );
 			break;
 		}
 		case GAME_RELIABLE_MESSAGE_STARTVOTE: {
@@ -3077,7 +3127,13 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 	time += GetMSec();
 
 	// update the real client time and the new frame flag
+	int newFrameMsec = 0;
 	if ( time > realClientTime ) {
+		// A snapshot correction can skip predicted frames.  Paused clocks
+		// must follow the entire forward step, while replayed frames must
+		// not shift them again.  The first frame after a join/demo seek has
+		// no previous prediction baseline and advances by one tick only.
+		newFrameMsec = realClientTime > 0 ? time - realClientTime : GetMSec();
 		realClientTime = time;
 		isNewFrame = true;
 	} else {
@@ -3112,7 +3168,7 @@ gameReturn_t idGameLocal::ClientPrediction( int clientNum, const usercmd_t *clie
 	const bool competitiveGameplayFrozen = mpGame.IsGameplayFrozen();
 	if ( competitiveGameplayFrozen ) {
 		if ( isNewFrame ) {
-			const int frameMsec = GetMSec();
+			const int frameMsec = newFrameMsec;
 			// Prediction can replay the same snapshot more than once.  Rebase the
 			// complete set of gameplay deadline owners only on the first pass for
 			// a real client frame, matching the authoritative server traversal.
