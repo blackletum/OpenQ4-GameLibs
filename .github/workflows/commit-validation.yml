@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Native cross-repository contracts use the matching engine's source and
+  # language tables instead of relying on a developer's sibling checkout.
+  OPENQ4_ENGINE_SHA: d3b58a3a3499799b4d62d632362a7560c61b67c6
+  OPENQ4_ENGINE_REPO: ${{ github.workspace }}/.tmp/openQ4
+
 concurrency:
   group: openq4-gamelibs-validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -33,6 +39,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Checkout matching engine contract inputs
+        uses: actions/checkout@v6
+        with:
+          repository: themuffinator/openQ4
+          ref: ${{ env.OPENQ4_ENGINE_SHA }}
+          path: .tmp/openQ4
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -183,6 +197,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Checkout matching engine contract inputs
+        uses: actions/checkout@v6
+        with:
+          repository: themuffinator/openQ4
+          ref: ${{ env.OPENQ4_ENGINE_SHA }}
+          path: .tmp/openQ4
+          persist-credentials: false
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -317,6 +339,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Checkout matching engine contract inputs
+        uses: actions/checkout@v6
+        with:
+          repository: themuffinator/openQ4
+          ref: ${{ env.OPENQ4_ENGINE_SHA }}
+          path: .tmp/openQ4
+          persist-credentials: false
+
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -396,6 +426,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Checkout matching engine contract inputs
+        uses: actions/checkout@v6
+        with:
+          repository: themuffinator/openQ4
+          ref: ${{ env.OPENQ4_ENGINE_SHA }}
+          path: .tmp/openQ4
+          persist-credentials: false
 
       - name: Setup Python
         uses: actions/setup-python@v6

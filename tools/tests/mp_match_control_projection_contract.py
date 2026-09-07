@@ -433,7 +433,8 @@ int main() {
     return 0;
 }
 '''
-    strings_root = ROOT.parent / "openQ4/content/baseoq4/pak0/strings"
+    engine_root = Path(os.environ.get("OPENQ4_ENGINE_REPO", ROOT.parent / "openQ4"))
+    strings_root = engine_root / "content/baseoq4/pak0/strings"
     languages = ("english", "french", "italian", "spanish", "polish", "russian")
     keys = ("#str_42873", "#str_42870", "#str_42871", "#str_201012",
             "#str_201013", "#str_41313", "#str_41315")
