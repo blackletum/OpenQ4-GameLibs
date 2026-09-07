@@ -504,7 +504,8 @@ static bool ValidateSMAAMaterial( const idMaterial* material, const char* materi
 }
 
 static bool EvaluateSMAAAvailability( rvmGameRender_t& gameRender ) {
-	return ValidateSMAAMaterial(
+	// Let the backend reject unsupported SMAA before compiling its shaders.
+	return renderSystem->ValidateSMAALookupTextures() && ValidateSMAAMaterial(
 		gameRender.smaaEdgePostProcessMaterial,
 		( gameRender.smaaEdgePostProcessMaterial != NULL ) ? gameRender.smaaEdgePostProcessMaterial->GetName() : "postprocess/smaa_edge" ) &&
 		ValidateSMAAMaterial(
@@ -513,7 +514,6 @@ static bool EvaluateSMAAAvailability( rvmGameRender_t& gameRender ) {
 		ValidateSMAAMaterial(
 			gameRender.smaaBlendPostProcessMaterial,
 			( gameRender.smaaBlendPostProcessMaterial != NULL ) ? gameRender.smaaBlendPostProcessMaterial->GetName() : "postprocess/smaa_blend" ) &&
-		renderSystem->ValidateSMAALookupTextures() &&
 		( gameRender.postProcessRT[0] != NULL ) &&
 		( gameRender.postProcessRT[1] != NULL ) &&
 		( gameRender.postProcessRT[2] != NULL ) &&
