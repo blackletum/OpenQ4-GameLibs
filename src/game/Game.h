@@ -704,7 +704,9 @@ extern rvGameLog *				gameLog;
 //     public timescale CVar
 // 47: shared idRenderSystem::ClearRenderTarget carries alpha for transparent
 //     retained UI composition targets; engine and game modules must match.
-const int GAME_API_VERSION		= 47;
+// 48: idUserInterface presentation value and text-input queries replace the
+//     public desktop window pointer; rebuild engine and both game modules.
+const int GAME_API_VERSION		= 48;
 
 struct gameImport_t {
 

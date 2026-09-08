@@ -38,6 +38,16 @@ the editor save/package/run round trip. A clean main menu is insufficient.
 
 ## Progress
 
+- Presentation boundary: game API 48 removes `GetDesktop()`/`idWindow` from the
+  public GUI interface. Presentation value reads, explicit/transient writes and
+  focused text-field queries replace window-pointer access. Both player sources
+  now use the value API for their inherited `_XENON` weapon selector and D-pad
+  metadata; desktop gameplay validation does not qualify those console paths.
+  The engine's [boundary contract](https://github.com/themuffinator/openQ4/blob/idtech5-ui/docs/dev/ui/presentation-bridge.md)
+  records behavior and validation. Rebuild and ship engine and both game modules
+  together; renderer API remains 13 and no save format changes. Full retained
+  alias mapping, game action/state integration and GUI migration remain open.
+
 - Stage 0: companion branch and integration contract created. No source or ABI
   changes yet. Full runtime, GUI migration, editor and qualification remain.
 - Composition checkpoint: game API 47 accompanies renderer API 13. The shared
