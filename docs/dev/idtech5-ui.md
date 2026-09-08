@@ -40,3 +40,8 @@ the editor save/package/run round trip. A clean main menu is insufficient.
 
 - Stage 0: companion branch and integration contract created. No source or ABI
   changes yet. Full runtime, GUI migration, editor and qualification remain.
+- Composition checkpoint: game API 47 accompanies renderer API 13. The shared
+  `ClearRenderTarget` call now accepts alpha so UI layers start transparent.
+  Its default remains opaque for existing SP/MP scene clears. Rebuild and ship
+  engine, renderer modules and both game modules together; mismatched game APIs
+  are rejected during loading. This is runtime infrastructure, not GUI migration.
