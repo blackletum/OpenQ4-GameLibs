@@ -53,3 +53,8 @@ the editor save/package/run round trip. A clean main menu is insufficient.
   [input checkpoint](https://github.com/themuffinator/openQ4/blob/idtech5-ui/docs/dev/ui/input-routing.md)
   records session ownership and gameplay timing checks; semantic game dispatch,
   per-entity UI instances and full GUI migration remain pending.
+- Header qualification: the companion `engineWindowState_t` copy now includes
+  the engine's display scale and window-to-framebuffer density fields. Game code
+  does not currently read this global, but the shared declaration must match.
+  CI pins the published companion revision and checks every shared header
+  against that exact revision as well as the local workspace.
