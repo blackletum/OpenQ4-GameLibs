@@ -110,6 +110,8 @@ source revisions are never guessed to use the older player-field layout.
 - Improve long-term maintainability on modern systems.
 
 ## Credits
+
+- [Emile Belanger (emileb)](https://github.com/emileb) — original Android, SigmaTouch and GLES support in [openQ4](https://github.com/emileb/openQ4); the matching renderer configuration header supports the current official integration.
 - Upstream Quake4SDK (Quake 4 v1.4.2 SDK baseline)
 - id Software
 - Raven Software

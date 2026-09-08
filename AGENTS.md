@@ -53,6 +53,7 @@ This file describes project goals, rules, and upstream credits for anyone workin
 - Quake 4 engine decompiled (Hex-Rays): `E:\_src\\_CODE\Quake4Decompiled-main`
 
 **Upstream Credits**
+- [Emile Belanger (emileb)](https://github.com/emileb) — original Android, SigmaTouch and GLES support in openQ4.
 - Upstream Quake4SDK (Quake 4 v1.4.2 SDK baseline).
 - id Software.
 - Raven Software.
