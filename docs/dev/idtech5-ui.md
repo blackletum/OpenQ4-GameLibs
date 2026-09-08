@@ -1,6 +1,6 @@
 # idtech5-ui companion integration
 
-Status: planned, 8 September 2026. Work is on branch `idtech5-ui`, created from
+Status: runtime integration in progress, 8 September 2026. Work is on branch `idtech5-ui`, created from
 the current `android-gles` checkout to retain Android/GLES support.
 
 The engine's [replacement plan](https://github.com/themuffinator/openQ4/blob/idtech5-ui/docs/dev/plans/idtech5-ui.md)
@@ -45,3 +45,11 @@ the editor save/package/run round trip. A clean main menu is insufficient.
   Its default remains opaque for existing SP/MP scene clears. Rebuild and ship
   engine, renderer modules and both game modules together; mismatched game APIs
   are rejected during loading. This is runtime infrastructure, not GUI migration.
+- Input ownership: `SE_RETAINED_UI` is appended to the shared event enum for an
+  engine-owned ordered input payload. Existing event values and `sysEvent_t`
+  layout are unchanged, and the engine consumes these events before legacy/game
+  dispatch. Game API 47 and renderer API 13 stay unchanged. Both SP/MP modules
+  are rebuilt with the coordinated header. The engine's
+  [input checkpoint](https://github.com/themuffinator/openQ4/blob/idtech5-ui/docs/dev/ui/input-routing.md)
+  records session ownership and gameplay timing checks; semantic game dispatch,
+  per-entity UI instances and full GUI migration remain pending.
