@@ -15,6 +15,39 @@
 #include "client/ClientEffect.h"
 //#include "../renderer/tr_local.h"
 
+/*
+================
+OpenQ4_FindPreMultiplayerWeaponDict
+
+idGameLocal::FindEntityDef silently redirects every lookup from "X" to "X_mp"
+while a multiplayer game is running, and every stock weapon_*_mp def zeroes the
+four muzzle_kick_* keys.  rvWeapon::MuzzleRise is identical in both game trees,
+so that redirect is the whole reason a weapon shoves the view model back in
+single player and sits perfectly still in multiplayer.  Walk back across it to
+reach the def the redirect replaced.
+
+Deliberately not gameLocal.FindEntityDef(): that is the call applying the
+redirect, and it would hand back the multiplayer def again.
+================
+*/
+static const idDict *OpenQ4_FindPreMultiplayerWeaponDict( const idDeclEntityDef *weaponDef ) {
+	static const char	mpSuffix[] = "_mp";
+	const int			mpSuffixLength = sizeof( mpSuffix ) - 1;
+
+	if ( !gameLocal.isMultiplayer || weaponDef == NULL ) {
+		return NULL;
+	}
+
+	idStr name = weaponDef->GetName();
+	if ( name.Length() <= mpSuffixLength || idStr::Icmp( name.c_str() + name.Length() - mpSuffixLength, mpSuffix ) != 0 ) {
+		return NULL;
+	}
+	name.CapLength( name.Length() - mpSuffixLength );
+
+	const idDeclEntityDef *baseDef = static_cast<const idDeclEntityDef *>( declManager->FindType( DECL_ENTITYDEF, name.c_str(), false ) );
+	return baseDef ? &baseDef->dict : NULL;
+}
+
 int rvWeapon::GetFirstPersonShadowSuppressLightId( void ) const {
 	if ( owner == NULL ) {
 		return 0;
@@ -790,6 +823,23 @@ void rvWeapon::Spawn ( void ) {
 	muzzle_kick_maxtime	= SEC2MS( spawnArgs.GetFloat( "muzzle_kick_maxtime" ) );
 	muzzle_kick_angles	= spawnArgs.GetAngles( "muzzle_kick_angles" );
 	muzzle_kick_offset	= spawnArgs.GetVector( "muzzle_kick_offset" );
+
+	// openQ4: the stock multiplayer defs zero the kick above, so the multiplayer
+	// view model never moves when it fires.  Take each weapon's own single player
+	// values back off the def the "_mp" redirect replaced.  This is presentation
+	// only - MuzzleRise feeds the view model transform, and no stock weapon sets
+	// launchFromBarrel, so neither aim nor muzzle origin can follow it.  Whether the
+	// kick is shown at all is g_weaponMuzzleKick's call, made in MuzzleRise.
+	const bool defHasMuzzleKick = muzzle_kick_maxtime > 0 && ( muzzle_kick_angles != ang_zero || muzzle_kick_offset != vec3_origin );
+	if ( !defHasMuzzleKick ) {
+		const idDict *singlePlayerDict = OpenQ4_FindPreMultiplayerWeaponDict( weaponDef );
+		if ( singlePlayerDict ) {
+			muzzle_kick_time	= SEC2MS( singlePlayerDict->GetFloat( "muzzle_kick_time" ) );
+			muzzle_kick_maxtime	= SEC2MS( singlePlayerDict->GetFloat( "muzzle_kick_maxtime" ) );
+			muzzle_kick_angles	= singlePlayerDict->GetAngles( "muzzle_kick_angles" );
+			muzzle_kick_offset	= singlePlayerDict->GetVector( "muzzle_kick_offset" );
+		}
+	}
 
 	// General weapon properties
 	wfl.silent_fire		= spawnArgs.GetBool( "silent_fire" );
@@ -2510,6 +2560,13 @@ void rvWeapon::MuzzleRise( idVec3 &origin, idMat3 &axis ) {
 	float		amount;
 	idAngles	ang;
 	idVec3		offset;
+
+	// openQ4: the player-facing view weapon kick switch.  Gated here rather than
+	// where the def values are read, so a change takes effect on the next shot
+	// instead of the next weapon spawn.
+	if ( !g_weaponMuzzleKick.GetBool() ) {
+		return;
+	}
 
 	time = kick_endtime - gameLocal.time;
 	if ( time <= 0 ) {

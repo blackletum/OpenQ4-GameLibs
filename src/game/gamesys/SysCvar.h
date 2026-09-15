@@ -344,6 +344,7 @@ extern idCVar	g_brassTime;
 extern idCVar	g_gun_x;
 extern idCVar	g_gun_y;
 extern idCVar	g_gun_z;
+extern idCVar	g_weaponMuzzleKick;
 extern idCVar	cl_gun_x;
 extern idCVar	cl_gun_y;
 extern idCVar	cl_gun_z;

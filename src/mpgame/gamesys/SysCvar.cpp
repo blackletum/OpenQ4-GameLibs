@@ -622,6 +622,7 @@ idCVar cl_gun_x(					"cl_gun_x",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_
 idCVar cl_gun_y(					"cl_gun_y",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_NOCHEAT, "client first-person weapon forward offset" );
 idCVar cl_gun_z(					"cl_gun_z",					"0",			PC_CVAR_ARCHIVE | CVAR_FLOAT | CVAR_NOCHEAT, "client first-person weapon up offset" );
 idCVar g_weaponFovEffect(			"g_weaponFovEffect",		"0",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "Adjusts the position of the weapon model with increased fov" );
+idCVar g_weaponMuzzleKick(			"g_weaponMuzzleKick",	"1",			CVAR_GAME | PC_CVAR_ARCHIVE | CVAR_BOOL, "view weapon kicks back when it fires; 0 holds the view model still" );
 
 idCVar g_viewNodalX(				"g_viewNodalX",				"0",			CVAR_GAME | CVAR_FLOAT, "" );
 idCVar g_viewNodalZ(				"g_viewNodalZ",				"0",			CVAR_GAME | CVAR_FLOAT, "" );

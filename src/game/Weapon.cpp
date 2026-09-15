@@ -2491,6 +2491,13 @@ void rvWeapon::MuzzleRise( idVec3 &origin, idMat3 &axis ) {
 	idAngles	ang;
 	idVec3		offset;
 
+	// openQ4: the player-facing view weapon kick switch.  Gated here rather than
+	// where the def values are read, so a change takes effect on the next shot
+	// instead of the next weapon spawn.
+	if ( !g_weaponMuzzleKick.GetBool() ) {
+		return;
+	}
+
 	time = kick_endtime - gameLocal.time;
 	if ( time <= 0 ) {
 		return;
