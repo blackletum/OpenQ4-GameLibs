@@ -5,10 +5,10 @@
 #include "Game_local.h"
 #include "../renderer/ImageOpts.h"
 
-idCVar g_renderCasUpscale("g_renderCasUpscale", "0", CVAR_BOOL, "toggles the optional CAS post-process pass when a CAS material is available");
-idCVar g_renderFastNoPost("g_renderFastNoPost", "1", CVAR_BOOL, "render through the direct no-post path when AA, blur, and CAS are disabled");
-idCVar g_renderFastNoPostDirect("g_renderFastNoPostDirect", "1", CVAR_BOOL, "render directly to the backbuffer when the no-post path has no active post-processing work");
-idCVar g_renderCaptureCurrentRender("g_renderCaptureCurrentRender", "0", CVAR_BOOL, "force an end-of-view _currentRender copy instead of relying on on-demand post-process capture");
+idCVar g_renderCasUpscale("g_renderCasUpscale", "0", CVAR_GAME | CVAR_BOOL, "toggles the optional CAS post-process pass when a CAS material is available");
+idCVar g_renderFastNoPost("g_renderFastNoPost", "1", CVAR_GAME | CVAR_BOOL, "render through the direct no-post path when AA, blur, and CAS are disabled");
+idCVar g_renderFastNoPostDirect("g_renderFastNoPostDirect", "1", CVAR_GAME | CVAR_BOOL, "render directly to the backbuffer when the no-post path has no active post-processing work");
+idCVar g_renderCaptureCurrentRender("g_renderCaptureCurrentRender", "0", CVAR_GAME | CVAR_BOOL, "force an end-of-view _currentRender copy instead of relying on on-demand post-process capture");
 
 enum openq4PostAAMode_t {
 	OPENQ4_POST_AA_OFF = 0,
