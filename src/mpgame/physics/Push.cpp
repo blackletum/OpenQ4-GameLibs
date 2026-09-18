@@ -1109,6 +1109,15 @@ float idPush::ClipTranslationalPush( trace_t &results, idEntity *pusher, const i
 		return totalMass;
 	}
 
+	// The collision system cannot sweep a trace model further than CM_MAX_TRACE_DIST, so a
+	// longer move is a teleport, not a push. A mover bound to an animated joint jumps with it
+	// when the animation changes (the mcc_landing ship snaps ~8400 units into its flyby);
+	// sweeping that fails as a huge translation, which blocked the whole team on whatever lay
+	// in the swept bounds. A pusher that clips against the world still cannot make the move.
+	if ( !( flags & PUSHFL_CLIP ) && translation.LengthSqr() > Square( CM_MAX_TRACE_DIST ) ) {
+		return totalMass;
+	}
+
 	dir = translation;
 	dir.Normalize();
 	dir.z += 1.0f;
