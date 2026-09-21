@@ -4096,6 +4096,12 @@ void idGameLocal::QueueUnreliableMessage( int clientNum, const idBitMsg &msg ) {
 	if ( clientNum < 0 || clientNum > MAX_CLIENTS ) {
 		return;
 	}
+	// Bots have no receiving connection or snapshots to drain a batch. Keep
+	// the dedicated recording slot, and filter recipients rather than message
+	// subjects so human spectators following a bot still get its feedback.
+	if ( clientNum < MAX_CLIENTS && botManager.IsBot( clientNum ) ) {
+		return;
+	}
 	idMsgQueue &batch = unreliableMessages[ clientNum ];
 	if ( batch.GetTotalSize() + msg.GetSize() <= MAX_UNRELIABLE_BATCH_BYTES &&
 		 batch.Add( msg.GetData(), msg.GetSize(), false ) ) {
@@ -4121,7 +4127,7 @@ void idGameLocal::SendUnreliableMessage( const idBitMsg &msg, const int clientNu
 	idPlayer *player;
 	
 	for ( icl = 0; icl < numClients; icl++ ) {
-		if ( icl == localClientNum ) {
+		if ( icl == localClientNum || botManager.IsBot( icl ) ) {
 			// not to local client
 			// note that if local is spectated he will still get it
 			continue;
@@ -4129,7 +4135,7 @@ void idGameLocal::SendUnreliableMessage( const idBitMsg &msg, const int clientNu
 		if ( !entities[ icl ] ) {
 			continue;
 		}
-		if ( icl != clientNum ) {
+		if ( clientNum != -1 && icl != clientNum ) {
 			player = static_cast< idPlayer * >( entities[ icl ] );
 			// drop all clients except the ones that follow the client we emit to
 			if ( !player->spectating || player->spectator != clientNum ) {
@@ -4211,7 +4217,6 @@ excludeClient to -1 for no exclusions
 void idGameLocal::SendUnreliableMessagePVS( const idBitMsg &msg, const idEntity *instanceEnt, int area1, int area2 ) {
 	int			icl;
 	int			matchInstance = instanceEnt ? instanceEnt->GetInstance() : -1;
-	idPlayer	*player;
 	int			areas[ 2 ];
 	int			numEvAreas;
 
@@ -4226,7 +4231,7 @@ void idGameLocal::SendUnreliableMessagePVS( const idBitMsg &msg, const idEntity 
 	}
 
 	for ( icl = 0; icl < numClients; icl++ ) {
-		if ( icl == localClientNum ) {
+		if ( icl == localClientNum || botManager.IsBot( icl ) ) {
 			// local client is always excluded
 			continue;
 		}
@@ -4237,7 +4242,6 @@ void idGameLocal::SendUnreliableMessagePVS( const idBitMsg &msg, const idEntity 
 			continue;
 		}
 		const bool clientHasPVS = clientsPVS[ icl ].i >= 0;
-		player = static_cast< idPlayer * >( entities[ icl ] );
 
 		// if no areas are given, this is a global emit
 		if ( numEvAreas && clientHasPVS ) {
