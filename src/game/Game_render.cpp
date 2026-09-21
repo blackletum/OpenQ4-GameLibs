@@ -907,6 +907,7 @@ void idGameLocal::ShutdownGameRenderSystem( void ) {
 	gameRender.postProcessAvailable = false;
 	gameRender.smaaAvailable = false;
 	gameRender.forwardRenderSamples = 0;
+	gameRender.hdrSceneTarget = false;
 	gameRender.renderTargetWidth = 0;
 	gameRender.renderTargetHeight = 0;
 	gameRender.temporalHistoryWidth = 0;
@@ -1116,17 +1117,26 @@ static bool openQ4_ResolveTemporalPresentation(
 	return true;
 }
 
+static bool openQ4_HDRSceneTargetRequested( void ) {
+	// Vulkan's scene post pass owns tone mapping before authored post effects,
+	// SMAA and native HUD composition. Its forward/MSAA resolve must retain HDR
+	// energy until that point. OpenGL keeps its existing modern-scene ownership.
+	return idStr::Icmp( cvarSystem->GetCVarString( "r_actualRenderApi" ), "vulkan" ) == 0
+		&& !cvarSystem->GetCVarBool( "r_skipPostProcess" )
+		&& cvarSystem->GetCVarBool( "r_hdrSceneTarget" )
+		&& ( cvarSystem->GetCVarBool( "r_hdrToneMap" ) || cvarSystem->GetCVarInteger( "r_hdrDebugView" ) > 0 );
+}
+
 static idRenderTexture* openQ4_CreateForwardRenderTarget( int requestedSamples,
-		int targetWidth, int targetHeight, int& effectiveSamples ) {
+		int targetWidth, int targetHeight, bool hdrScene, int& effectiveSamples ) {
 	effectiveSamples = 0;
 	int attemptSamples = Max( 0, requestedSamples );
 
 	for ( ;; ) {
 		idImageOpts albedoOpts;
-		// The legacy Quake 4 light stack depends on LDR framebuffer clamping
-		// between blend/light-scale passes. Keep the game-level post chain LDR
-		// so post AA preserves stock scene color instead of creating an HDR path.
-		albedoOpts.format = FMT_RGBA8;
+		// Preserve stock blend clamping unless HDR tone mapping was explicitly
+		// requested. Post-AA targets stay LDR after the engine tone-map pass.
+		albedoOpts.format = hdrScene ? FMT_RGBA16F : FMT_RGBA8;
 		albedoOpts.colorFormat = CFM_DEFAULT;
 		albedoOpts.numLevels = 1;
 		albedoOpts.textureType = TT_2D;
@@ -1206,11 +1216,13 @@ void idGameLocal::InitGameRenderSystem(void) {
 	const int targetWidth = presentation.sceneWidth;
 	const int targetHeight = presentation.sceneHeight;
 	const int requestedMsaaSamples = Max( 0, cvarSystem->GetCVarInteger( "r_multiSamples" ) );
+	gameRender.hdrSceneTarget = openQ4_HDRSceneTargetRequested();
 
 	gameRender.forwardRenderPassRT = openQ4_CreateForwardRenderTarget(
 		requestedMsaaSamples,
 		targetWidth,
 		targetHeight,
+		gameRender.hdrSceneTarget,
 		gameRender.forwardRenderSamples );
 
 	for(int i = 0; i < 3; i++)
@@ -1243,6 +1255,7 @@ void idGameLocal::InitGameRenderSystem(void) {
 		opts.height = targetHeight;
 		opts.numMSAASamples = 0;
 
+		opts.format = gameRender.hdrSceneTarget ? FMT_RGBA16F : FMT_RGBA8;
 		idImage *albedoImage = renderSystem->CreateImage("_forwardRenderResolvedAlbedo", &opts, TF_LINEAR);
 		// Match the forward pass depth attachment format so depth resolves/blits are valid
 		// on drivers that reject DEPTH_STENCIL -> DEPTH-only copies.
@@ -1340,6 +1353,11 @@ void idGameLocal::RenderScene(const renderView_t *view, idRenderWorld *renderWor
 	if ( gameRender.videoRestartCount != currentVideoRestartCount ) {
 		common->Printf( "Reinitializing game render targets after vid_restart (%d -> %d)\n",
 			gameRender.videoRestartCount, currentVideoRestartCount );
+		InitGameRenderSystem();
+	}
+	if ( gameRender.hdrSceneTarget != openQ4_HDRSceneTargetRequested() ) {
+		common->Printf( "Reinitializing game scene targets for %s rendering\n",
+			openQ4_HDRSceneTargetRequested() ? "HDR" : "LDR" );
 		InitGameRenderSystem();
 	}
 

@@ -407,6 +407,7 @@ struct rvmGameRender_t {
 	bool postProcessAvailable;
 	bool smaaAvailable;
 	int forwardRenderSamples;
+	bool hdrSceneTarget;
 	int renderTargetWidth;
 	int renderTargetHeight;
 	int temporalHistoryWidth;
