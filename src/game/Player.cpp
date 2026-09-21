@@ -232,7 +232,6 @@ const float	WEAPON_WHEEL_INNER_RING_RADIUS	= WEAPON_WHEEL_INNER_RADIUS + 1.8f;
 const float	WEAPON_WHEEL_INNER_RING_HALF_WIDTH = 1.7f;
 const float	WEAPON_WHEEL_INNER_RING_CORE_HALF_WIDTH = 0.8f;
 const float	WEAPON_WHEEL_MOUSE_SENSITIVITY	= 0.70f;
-const float	WEAPON_WHEEL_LOOK_SENSITIVITY	= 0.08f;
 const float	WEAPON_WHEEL_TIMESCALE_SCALE	= 0.18f;
 const float	WEAPON_WHEEL_BLEND_IN_SPEED		= 8.0f;
 const float	WEAPON_WHEEL_BLEND_OUT_SPEED	= 9.0f;
@@ -11493,8 +11492,10 @@ void idPlayer::UpdateWeaponWheelCursor( void ) {
 	weaponWheelCursor.x += mouseDx * WEAPON_WHEEL_MOUSE_SENSITIVITY;
 	weaponWheelCursor.y += mouseDy * WEAPON_WHEEL_MOUSE_SENSITIVITY;
 	if ( mouseDx == 0 && mouseDy == 0 ) {
-		weaponWheelCursor.x += lookDx * WEAPON_WHEEL_LOOK_SENSITIVITY;
-		weaponWheelCursor.y += lookDy * WEAPON_WHEEL_LOOK_SENSITIVITY;
+		const float sensitivity = idMath::ClampFloat( 0.25f, 16.0f, cvarSystem->GetCVarFloat( "in_weaponWheelSensitivity" ) );
+		// Turning right decreases yaw; wheel coordinates increase to the right.
+		weaponWheelCursor.x -= lookDx * sensitivity;
+		weaponWheelCursor.y += lookDy * sensitivity;
 	}
 
 	const float cursorLength = weaponWheelCursor.Length();
@@ -11560,6 +11561,9 @@ void idPlayer::UpdateWeaponWheel( void ) {
 		weaponWheelLastMouseX = usercmd.mx;
 		weaponWheelLastMouseY = usercmd.my;
 		weaponWheelHoveredSlot = GetDefaultWeaponWheelSlot();
+		for ( int axis = 0; axis < 3; ++axis ) {
+			weaponWheelLastCmdAngles[ axis ] = SHORT2ANGLE( usercmd.angles[ axis ] );
+		}
 	}
 
 	if ( weaponWheelActive ) {
