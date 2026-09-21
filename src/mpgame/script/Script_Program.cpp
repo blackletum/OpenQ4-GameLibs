@@ -2147,7 +2147,9 @@ bool idProgram::CompileText( const char *source, const char *text, bool console,
 
 // RAVEN BEGIN
 // bdube: Make sure the file hasnt already been loaded
-	if ( -1 != fileList.FindIndex ( idStr(source) ) ) {
+	// Every console snippet defines a new function, even though its source
+	// name is reused. Only file includes may be skipped by this cache.
+	if ( !console && -1 != fileList.FindIndex ( idStr(source) ) ) {
 		return true;
 	}
 // RAVEN END
