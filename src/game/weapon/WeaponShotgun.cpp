@@ -169,6 +169,13 @@ stateResult_t rvWeaponShotgun::State_Fire( const stateParms_t& parms ) {
 			return SRESULT_STAGE( STAGE_WAIT );
 	
 		case STAGE_WAIT:
+			// Retail fire.md5anim includes a pump after the recoil. In turbo,
+			// keep the shot/recoil but return to idle before that reload motion.
+			if ( OpenQ4_TurboModeActive() && gameLocal.time >= parms.time + 250 ) {
+				EjectBrass();
+				SetState( "Idle", 0 );
+				return SRESULT_DONE;
+			}
 			if ( (!gameLocal.isMultiplayer && (wsfl.lowerWeapon || AnimDone( ANIMCHANNEL_ALL, 0 )) ) || AnimDone( ANIMCHANNEL_ALL, 0 ) ) {
 				SetState( "Idle", 0 );
 				return SRESULT_DONE;
@@ -194,6 +201,9 @@ rvWeaponShotgun::State_Reload
 ================
 */
 stateResult_t rvWeaponShotgun::State_Reload ( const stateParms_t& parms ) {
+	if ( SkipReload() ) {
+		return SRESULT_DONE;
+	}
 	enum {
 		STAGE_INIT,
 		STAGE_WAIT,

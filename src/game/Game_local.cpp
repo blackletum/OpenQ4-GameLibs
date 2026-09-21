@@ -342,7 +342,9 @@ bool OpenQ4_TurboModeActive( void ) {
 	if ( gameLocal.isMultiplayer ) {
 		return false;
 	}
-	return g_turboMode.GetBool() || ( cvarSystem != NULL && cvarSystem->GetCVarBool( "g_turboMode" ) );
+	// The engine owns the live value across game-module changes. A stale
+	// module-local value must never override an explicit Off selection.
+	return cvarSystem != NULL ? cvarSystem->GetCVarBool( "g_turboMode" ) : g_turboMode.GetBool();
 }
 
 static bool OpenQ4_IsConvoy2bActorClassname( const char *classname ) {
