@@ -1118,11 +1118,10 @@ static bool openQ4_ResolveTemporalPresentation(
 }
 
 static bool openQ4_HDRSceneTargetRequested( void ) {
-	// Vulkan's scene post pass owns tone mapping before authored post effects,
-	// SMAA and native HUD composition. Its forward/MSAA resolve must retain HDR
-	// energy until that point. OpenGL keeps its existing modern-scene ownership.
-	return idStr::Icmp( cvarSystem->GetCVarString( "r_actualRenderApi" ), "vulkan" ) == 0
-		&& !cvarSystem->GetCVarBool( "r_skipPostProcess" )
+	// Both backends tone-map the scene before authored post effects, SMAA and
+	// native HUD composition. The game-owned forward/MSAA resolve must retain
+	// HDR energy through that handoff, including reduced-resolution scenes.
+	return !cvarSystem->GetCVarBool( "r_skipPostProcess" )
 		&& cvarSystem->GetCVarBool( "r_hdrSceneTarget" )
 		&& ( cvarSystem->GetCVarBool( "r_hdrToneMap" ) || cvarSystem->GetCVarInteger( "r_hdrDebugView" ) > 0 );
 }
