@@ -28,6 +28,7 @@ If you have questions concerning this license or the applicable additional terms
 
 #ifndef __MATERIAL_H__
 #define __MATERIAL_H__
+#include "RendererConsumedPolicy.h"
 
 /*
 ===============================================================================
@@ -553,6 +554,10 @@ class idSoundEmitter;
 class idMaterial : public idDecl {
 public:
 	idMaterial();
+	idMaterial(const idMaterial&) = delete;
+	idMaterial& operator=(const idMaterial&) = delete;
+	uint64_t GetImagePolicyIdentity() const { return imagePolicyIdentity; }
+	bool GetConsumedPolicy(materialConsumedPolicy_t& output) const;
 	virtual				~idMaterial();
 
 	virtual size_t		Size(void) const;
@@ -869,6 +874,9 @@ public:
 	// will return a pointer to an internal table, and EvaluateRegisters will not need
 	// to be called.  If NULL is returned, EvaluateRegisters must be used.
 	const float* ConstantRegisters() const;
+	// Prove an individual literal/folded register independently of the optional
+	// whole-material cache and of unrelated animated material parameters.
+	bool GetConstantRegisterValue( int registerIndex, float &value ) const;
 
 	bool				SuppressInSubview() const { return suppressInSubview; };
 	bool				IsPortalSky() const { return portalSky; };
@@ -881,6 +889,10 @@ public:
 	virtual void		ResolveUse();
 
 private:
+	materialConsumedPolicy_t consumedPolicy{};
+	uint64_t consumedParseRevision = 0;
+	uint32_t consumedParseDepth = 0;
+	const uint64_t imagePolicyIdentity;
 	// parse the entire material
 	void				CommonInit();
 	void				ParseMaterial(idLexer& src);

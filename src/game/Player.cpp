@@ -232,7 +232,6 @@ const float	WEAPON_WHEEL_INNER_RING_RADIUS	= WEAPON_WHEEL_INNER_RADIUS + 1.8f;
 const float	WEAPON_WHEEL_INNER_RING_HALF_WIDTH = 1.7f;
 const float	WEAPON_WHEEL_INNER_RING_CORE_HALF_WIDTH = 0.8f;
 const float	WEAPON_WHEEL_MOUSE_SENSITIVITY	= 0.70f;
-const float	WEAPON_WHEEL_LOOK_SENSITIVITY	= 0.08f;
 const float	WEAPON_WHEEL_TIMESCALE_SCALE	= 0.18f;
 const float	WEAPON_WHEEL_BLEND_IN_SPEED		= 8.0f;
 const float	WEAPON_WHEEL_BLEND_OUT_SPEED	= 9.0f;
@@ -6585,10 +6584,7 @@ void idPlayer::ScheduleWeaponSwitch(int weapon)
 	hud->HandleNamedEvent( "weaponSelect" );
 	
 	// nrausch: support for turning the weapon change ui on and off
-	idWindow *win = FindWindowByName( "p_weapswitch", hud->GetDesktop() );
-	if ( win ) {
-		win->SetVisible( false );
-	}
+	hud->SetPresentationValue( "p_weapswitch::visible", "0", false );
 
 	if ( weapon > 0 ) {
 		const char *weap = spawnArgs.GetString( va( "def_weapon%d", weapon-1 ) );
@@ -6718,10 +6714,7 @@ void idPlayer::NextWeapon( void ) {
 
 	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {		
 		if ( entityNumber == gameLocal.localClientNum ) {
-			idWindow *win = FindWindowByName( "p_weapswitch", hud->GetDesktop() );
-			if ( win ) {
-				win->SetVisible( true );
-			}
+			hud->SetPresentationValue( "p_weapswitch::visible", "1", false );
 		}
  		
  		if ( gameLocal.isClient ) {
@@ -6816,10 +6809,7 @@ void idPlayer::PrevWeapon( void ) {
 
 	if ( ( w != currentWeapon ) && ( w != idealWeapon ) ) {
 		if ( entityNumber == gameLocal.localClientNum ) {
-			idWindow *win = FindWindowByName( "p_weapswitch", hud->GetDesktop() );
-			if ( win ) {
-				win->SetVisible( true );
-			}
+			hud->SetPresentationValue( "p_weapswitch::visible", "1", false );
 		}
  		
 		if ( gameLocal.isClient ) {
@@ -8432,12 +8422,9 @@ void idPlayer::UpdateFocus( void ) {
 #ifdef _XENON
 			int usepad = 0;
 			if ( focusUI ) {
-				idWindow *dwin = ui->GetDesktop();
-				if ( dwin ) {
-					idWinVar *wv = dwin->GetWinVarByName("dpadGUI");
-					if ( wv ) {
-						usepad = atoi(wv->c_str());
-					}
+				idStr value;
+				if ( ui->GetPresentationValue( "dpadGUI", value ) ) {
+					usepad = atoi( value.c_str() );
 				}
 			}
 			hud->SetStateInt( "GUIIsNotUsingDPad", (usepad) ? 0 : 1 );
@@ -11505,8 +11492,10 @@ void idPlayer::UpdateWeaponWheelCursor( void ) {
 	weaponWheelCursor.x += mouseDx * WEAPON_WHEEL_MOUSE_SENSITIVITY;
 	weaponWheelCursor.y += mouseDy * WEAPON_WHEEL_MOUSE_SENSITIVITY;
 	if ( mouseDx == 0 && mouseDy == 0 ) {
-		weaponWheelCursor.x += lookDx * WEAPON_WHEEL_LOOK_SENSITIVITY;
-		weaponWheelCursor.y += lookDy * WEAPON_WHEEL_LOOK_SENSITIVITY;
+		const float sensitivity = idMath::ClampFloat( 0.25f, 16.0f, cvarSystem->GetCVarFloat( "in_weaponWheelSensitivity" ) );
+		// Turning right decreases yaw; wheel coordinates increase to the right.
+		weaponWheelCursor.x -= lookDx * sensitivity;
+		weaponWheelCursor.y += lookDy * sensitivity;
 	}
 
 	const float cursorLength = weaponWheelCursor.Length();
@@ -11572,6 +11561,9 @@ void idPlayer::UpdateWeaponWheel( void ) {
 		weaponWheelLastMouseX = usercmd.mx;
 		weaponWheelLastMouseY = usercmd.my;
 		weaponWheelHoveredSlot = GetDefaultWeaponWheelSlot();
+		for ( int axis = 0; axis < 3; ++axis ) {
+			weaponWheelLastCmdAngles[ axis ] = SHORT2ANGLE( usercmd.angles[ axis ] );
+		}
 	}
 
 	if ( weaponWheelActive ) {

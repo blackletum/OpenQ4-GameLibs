@@ -169,6 +169,9 @@ rvWeaponGrenadeLauncher::State_Reload
 ================
 */
 stateResult_t rvWeaponGrenadeLauncher::State_Reload ( const stateParms_t& parms ) {
+	if ( SkipReload() ) {
+		return SRESULT_DONE;
+	}
 	enum {
 		STAGE_INIT,
 		STAGE_WAIT,

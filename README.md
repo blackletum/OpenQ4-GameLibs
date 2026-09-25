@@ -9,7 +9,9 @@ This repository is the canonical source-input repository for SDK/game-library co
 ## Included
 - Game library source code in `src/game` and `src/mpgame`
 - Shared SDK-era interfaces used by Quake 4 style game modules
+- HDR scene buffers that preserve bright highlights through scene scaling and MSAA on OpenGL and Vulkan
 - Multiplayer chat delivery for openQ4's retained conversation panel, channel switching and history, with the existing chat bindings preserved
+- Multiplayer bots with runtime map navigation, mode objectives, character personalities, and combat decisions based on what they can see and remember
 - Meson/Ninja build configuration for modern local builds
 
 ## Not Included
@@ -110,6 +112,8 @@ source revisions are never guessed to use the older player-field layout.
 - Improve long-term maintainability on modern systems.
 
 ## Credits
+
+- [Emile Belanger (emileb)](https://github.com/emileb) — original Android, SigmaTouch and GLES support in [openQ4](https://github.com/emileb/openQ4); the matching renderer configuration header supports the current official integration.
 - Upstream Quake4SDK (Quake 4 v1.4.2 SDK baseline)
 - id Software
 - Raven Software

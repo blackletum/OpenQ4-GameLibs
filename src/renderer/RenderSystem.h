@@ -10,6 +10,7 @@ class idRenderTexture;
 
 #include "ImageOpts.h"
 #include "RendererCaps.h"
+#include "RetainedFontTypes.h"
 // jmarshall end
 
 /*
@@ -67,6 +68,7 @@ typedef struct glconfig_s {
 	bool				sharedTexturePaletteAvailable;
 	bool				textureCompressionAvailable;
 	bool				bptcTextureCompressionAvailable;
+	bool				etc2TextureCompressionAvailable;
 // RAVEN BEGIN
 // dluetscher: added
 	bool				drawRangeElementsAvailable;
@@ -645,7 +647,7 @@ public:
 	virtual void			ResolveMSAA(idRenderTexture* msaaRenderTexture, idRenderTexture* destRenderTexture, bool resolveDepth = false) = 0;
 
 	// Clears the current render target
-	virtual void			ClearRenderTarget(bool clearColor, bool clearDepth, float depthValue, float red, float green, float blue) = 0;
+	virtual void			ClearRenderTarget(bool clearColor, bool clearDepth, float depthValue, float red, float green, float blue, float alpha = 1.0f) = 0;
 
 	// Sets the source dimensions used by post-process shader parameter bindings.
 	virtual void			SetPostProcessSourceSize(int width, int height) = 0;
@@ -709,6 +711,13 @@ public:
 		idRenderTexture *sceneDepthTarget,
 		idRenderTexture *historyReadTarget,
 		idRenderTexture *historyWriteTarget ) = 0;
+
+	// Retained text uses physical output pixels rather than legacy 12/24/48
+	// slots. Appended ABI slots; reset only after all retained views and queued
+	// submissions have released their old glyph references.
+	virtual bool GetRetainedFontMetrics(const char* face, int pixels, renderFontMetrics_t& out) = 0;
+	virtual bool GetRetainedFontGlyph(const char* face, int pixels, unsigned int scalar, renderFontGlyph_t& out) = 0;
+	virtual void ResetRetainedFontCache() = 0;
 };
 
 extern idRenderSystem *		renderSystem;

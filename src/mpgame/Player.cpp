@@ -6494,10 +6494,7 @@ void idPlayer::ScheduleWeaponSwitch(int weapon)
 	hud->HandleNamedEvent( "weaponSelect" );
 	
 	// nrausch: support for turning the weapon change ui on and off
-	idWindow *win = FindWindowByName( "p_weapswitch", hud->GetDesktop() );
-	if ( win ) {
-		win->SetVisible( false );
-	}
+	hud->SetPresentationValue( "p_weapswitch::visible", "0", false );
 
 	if ( weapon > 0 ) {
 		const char *weap = spawnArgs.GetString( va( "def_weapon%d", weapon-1 ) );
@@ -8339,12 +8336,9 @@ void idPlayer::UpdateFocus( void ) {
 #ifdef _XENON
 			int usepad = 0;
 			if ( focusUI ) {
-				idWindow *dwin = ui->GetDesktop();
-				if ( dwin ) {
-					idWinVar *wv = dwin->GetWinVarByName("dpadGUI");
-					if ( wv ) {
-						usepad = atoi(wv->c_str());
-					}
+				idStr value;
+				if ( ui->GetPresentationValue( "dpadGUI", value ) ) {
+					usepad = atoi( value.c_str() );
 				}
 			}
 			hud->SetStateInt( "GUIIsNotUsingDPad", (usepad) ? 0 : 1 );

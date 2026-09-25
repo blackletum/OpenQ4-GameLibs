@@ -519,6 +519,11 @@ rvWeaponRocketLauncher::State_Rocket_Reload
 ================
 */
 stateResult_t rvWeaponRocketLauncher::State_Rocket_Reload ( const stateParms_t& parms ) {
+	// Rockets animate their loading hand on a separate state thread.
+	if ( OpenQ4_TurboModeActive() ) {
+		SetRocketState( "Rocket_Idle", 0 );
+		return SRESULT_DONE;
+	}
 	enum {
 		STAGE_INIT,
 		STAGE_WAIT,

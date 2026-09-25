@@ -778,6 +778,7 @@ bool BotCombatFindIncomingProjectileThreat( idPlayer *self,
 
 	const idBounds selfBounds = self->GetPhysics()->GetAbsBounds();
 	const idVec3 selfVelocity = self->GetPhysics()->GetLinearVelocity();
+	const float playerTravel = selfVelocity.Length() * lookAheadSeconds;
 	const float extraClearance = Max( 0.0f, threatClearance );
 
 	float bestTime = idMath::INFINITY;
@@ -811,25 +812,28 @@ bool BotCombatFindIncomingProjectileThreat( idPlayer *self,
 		const float unsafeClearance = extraClearance + projectileRadius;
 		const float estimatedTravel = ( projectileVelocity.Length() +
 			projectileGravity.Length() * lookAheadSeconds * 0.5f ) * lookAheadSeconds;
-		const float segmentLength = Max( 16.0f, unsafeClearance * 0.35f );
-		const int steps = idMath::ClampInt( BOTCOMBAT_MIN_TRAJECTORY_STEPS,
-			BOTCOMBAT_MAX_TRAJECTORY_STEPS,
-			(int)idMath::Ceil( estimatedTravel / segmentLength ) );
+		const float splashRadius = BotCombatProjectileSplashRadius( projectile );
 
 		// Analytic rejection first.  Over the horizon the projectile can cover at
 		// most estimatedTravel and the player at most its own speed times the
 		// horizon, so anything separated by more than the sum of those plus the
-		// clearance can never become a threat, whatever it does in between.
+		// greater of direct-hit clearance and splash radius cannot become a
+		// threat. A stationary grenade or a rocket hitting a nearby wall can hurt
+		// the bot without the projectile itself ever entering direct-hit range.
 		// Proving that with arithmetic matters because the sweep below is up to
 		// BOTCOMBAT_MAX_TRAJECTORY_STEPS bounds traces against the collision
 		// world, per projectile, per bot, several times a second: two players
 		// trading nailgun fire at the far end of the map would otherwise cost
 		// every bot on the server a full sweep of every round in flight.
-		const float reach = estimatedTravel + selfVelocity.Length() * lookAheadSeconds +
-			unsafeClearance;
+		const float reach = estimatedTravel + playerTravel + Max( unsafeClearance, splashRadius );
 		if ( selfBounds.ShortestDistance( projectileOrigin ) > reach ) {
 			continue;
 		}
+
+		const float segmentLength = Max( 16.0f, unsafeClearance * 0.35f );
+		const int steps = idMath::ClampInt( BOTCOMBAT_MIN_TRAJECTORY_STEPS,
+			BOTCOMBAT_MAX_TRAJECTORY_STEPS,
+			(int)idMath::Ceil( estimatedTravel / segmentLength ) );
 
 		// A terminating wall/actor collision limits the direct-flight search.  A
 		// bounce does not: without simulating the contact normal, it cannot prove
@@ -888,7 +892,6 @@ bool BotCombatFindIncomingProjectileThreat( idPlayer *self,
 			candidatePoint = projectedProjectile;
 		}
 
-		const float splashRadius = BotCombatProjectileSplashRadius( projectile );
 		if ( impact.terminating ) {
 			const bool impactThreat = impact.hitsSelf ||
 				BotCombatSplashThreatensPlayer( self, impact.hit, impact.point,

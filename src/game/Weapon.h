@@ -192,6 +192,7 @@ public:
 	void				SetStatus					( weaponStatus_t status );
 	void				SetReadyState				( void );
 	bool				AutoReload					( void );
+	bool				SkipReload					( void );
 	bool				IsHidden					( void ) const;
 	void				EjectBrass					( void );
 

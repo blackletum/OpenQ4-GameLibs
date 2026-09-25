@@ -1113,6 +1113,7 @@ void rvBot::UpdateEnemy( idPlayer *self ) {
 	const float		cosFov		= idMath::Cos( DEG2RAD( idMath::ClampFloat( 1.0f, 180.0f, traits.fov * 0.5f ) ) );
 	idPlayer *	nearest			= NULL;
 	float		nearestDistSqr	= sightSqr;
+	float		nearestScore	= idMath::INFINITY;
 	idPlayer *	best			= NULL;
 	float		bestScore		= idMath::INFINITY;
 	idPlayer *	current			= enemy.GetEntity();
@@ -1160,12 +1161,17 @@ void rvBot::UpdateEnemy( idPlayer *self ) {
 		if ( !damagedUs && dir * axis[0] < cosFov ) {
 			continue;
 		}
+		// A contender that cannot improve either choice still needs tracing if
+		// it is our current target: continuity and stickiness depend on it.
+		const float score = TargetScore( other, distSqr );
+		if ( other != current && distSqr >= nearestDistSqr && score >= bestScore ) {
+			continue;
+		}
+
 		idVec3 visiblePoint;
 		if ( !CanSee( self, other, &visiblePoint ) ) {
 			continue;
 		}
-
-		const float score = TargetScore( other, distSqr );
 
 		// Keep each contender's exposed point as it is sampled.  Whichever wins
 		// below already had this computed here, and BotCombatFindVisibleAimPoint
@@ -1174,6 +1180,7 @@ void rvBot::UpdateEnemy( idPlayer *self ) {
 		// hand.
 		if ( distSqr < nearestDistSqr ) {
 			nearestDistSqr		= distSqr;
+			nearestScore			= score;
 			nearest				= other;
 			nearestVisiblePoint	= visiblePoint;
 		}
@@ -1195,7 +1202,7 @@ void rvBot::UpdateEnemy( idPlayer *self ) {
 	// yields to an opponent scoring less than half as much.  The neutral 0.5
 	// resolves to the original 0.75 margin.
 	if ( current && currentScore < idMath::INFINITY && pick != current ) {
-		const float pickScore = pick ? TargetScore( pick, ( pick->GetPhysics()->GetOrigin() - origin ).LengthSqr() ) : idMath::INFINITY;
+		const float pickScore = targetPickBest ? bestScore : nearestScore;
 		const float switchMargin = 1.0f - 0.5f * traits.targetStickiness;
 
 		if ( pickScore > currentScore * switchMargin ) {
@@ -1653,16 +1660,16 @@ idEntity *rvBot::PickItemGoal( idPlayer *self, rvNavPath &goalPath, float &goalU
 			continue;
 		}
 
-		const float utility = ItemUtility( self, item );
-		const float distance = ( item->GetPhysics()->GetOrigin() - origin ).Length();
-		if ( utility <= 0.0f || distance > searchRange ) {
+		const float distanceSqr = ( item->GetPhysics()->GetOrigin() - origin ).LengthSqr();
+		if ( distanceSqr > searchRange * searchRange ) {
 			continue;
 		}
 
-		const int itemNode = navMesh.FindNearestNode( item->GetPhysics()->GetOrigin(), 256.0f, true );
-		if ( itemNode == -1 || navMesh.GetNode( itemNode ).area != startArea ) {
+		const float utility = ItemUtility( self, item );
+		if ( utility <= 0.0f ) {
 			continue;
 		}
+		const float distance = idMath::Sqrt( distanceSqr );
 
 		botItemCandidate_t candidate;
 		candidate.item = item;
@@ -1673,10 +1680,19 @@ idEntity *rvBot::PickItemGoal( idPlayer *self, rvNavPath &goalPath, float &goalU
 		while ( insertAt < candidates.Num() && candidates[insertAt].cheapScore >= candidate.cheapScore ) {
 			insertAt++;
 		}
-		candidates.Insert( candidate, insertAt );
-		if ( candidates.Num() > MAX_ROUTED_CANDIDATES ) {
+		// Do not spend hull/floor traces on an item that cannot enter the
+		// shortlist. Only accepted, reachable candidates displace an entry.
+		if ( insertAt >= MAX_ROUTED_CANDIDATES ) {
+			continue;
+		}
+		const int itemNode = navMesh.FindNearestNode( item->GetPhysics()->GetOrigin(), 256.0f, true );
+		if ( itemNode == -1 || navMesh.GetNode( itemNode ).area != startArea ) {
+			continue;
+		}
+		if ( candidates.Num() == MAX_ROUTED_CANDIDATES ) {
 			candidates.RemoveIndex( candidates.Num() - 1 );
 		}
+		candidates.Insert( candidate, insertAt );
 	}
 
 	idEntity *best = NULL;
@@ -1746,10 +1762,10 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 		currentItemValid = item && item->GetInstance() == self->GetInstance() &&
 			!item->pickedUp && !item->IsHidden() && !path.IsEmpty();
 
-		if ( item && item->pickedUp &&
+		if ( item && item->pickedUp && item->pickedUpByClientNum != clientNum &&
 			 ( item->GetPhysics()->GetOrigin() - origin ).LengthSqr() < BOT_ITEM_DENIED_RANGE * BOT_ITEM_DENIED_RANGE ) {
 			idPlayer *thief = NULL;
-			if ( item->pickedUpByClientNum >= 0 && item->pickedUpByClientNum != clientNum ) {
+			if ( item->pickedUpByClientNum >= 0 && item->pickedUpByClientNum < gameLocal.numClients ) {
 				idEntity *ent = gameLocal.entities[item->pickedUpByClientNum];
 				if ( ent && ent->IsType( idPlayer::GetClassType() ) ) {
 					thief = static_cast<idPlayer *>( ent );
@@ -1777,6 +1793,12 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 		return;
 	}
 	nextGoalSelectTime = gameLocal.time + BOT_GOAL_SELECT_MSEC;
+
+	// Inventory may have changed on the way (another health pack, ammo, or a
+	// weapon grant). A now-useless pickup must not retain its old commitment.
+	if ( currentItemValid ) {
+		currentItemValid = ItemUtility( self, static_cast<idItem *>( goalEntity.GetEntity() ) ) > 0.0f;
+	}
 
 	botObjective_t objective;
 	const bool hasObjective = BotFindObjective( self, objective );
@@ -1911,70 +1933,69 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 	const idEntity *	previousGoalEntity	= goalEntity.GetEntity();
 	const int			previousObjective	= objectiveKind;
 
+	// Evaluate replacements without touching the current route or its clocks.
+	// A failed objective/chase must not erase a useful item route, and repairing
+	// the same goal is not evidence of movement toward it.
+	rvNavPath selectedPath;
+	idVec3 selectedOrigin = origin;
+	idEntity *selectedEntity = NULL;
 	bool routeFound = false;
 	if ( desiredType == BOTGOAL_OBJECTIVE && objectiveAvailable ) {
-		goalOrigin = objectiveRouteOrigin;
-		routeFound = Repath( self, goalOrigin );
-		if ( !routeFound && ( goalOrigin - objective.origin ).LengthSqr() > 1.0f ) {
-			goalOrigin = objective.origin;
-			routeFound = Repath( self, goalOrigin );
-		}
-		if ( routeFound ) {
-			goalEntity = objective.entity.GetEntity();
-			objectiveKind = objective.kind;
-			objectiveHoldPosition = objective.holdPosition;
+		selectedOrigin = objectiveRouteOrigin;
+		selectedEntity = objective.entity.GetEntity();
+		routeFound = navMesh.FindPath( origin, selectedOrigin, selectedPath );
+		if ( !routeFound && ( selectedOrigin - objective.origin ).LengthSqr() > 1.0f ) {
+			selectedOrigin = objective.origin;
+			routeFound = navMesh.FindPath( origin, selectedOrigin, selectedPath );
 		}
 	} else if ( desiredType == BOTGOAL_ITEM && item ) {
-		path = itemPath;
-		pathCorner = 0;
-		pathTime = gameLocal.time;
-		repathFailures = 0;
-		noRouteSince = 0;
-		ResetTraversal();
-		routeFound = !path.IsEmpty();
-		if ( routeFound ) {
-			goalEntity = item;
-			goalOrigin = item->GetPhysics()->GetOrigin();
-		}
+		selectedPath = itemPath;
+		selectedEntity = item;
+		selectedOrigin = item->GetPhysics()->GetOrigin();
+		routeFound = !selectedPath.IsEmpty();
 	} else if ( desiredType == BOTGOAL_ENEMY && currentFoe ) {
 		enemyPathTime = gameLocal.time;
-		goalOrigin = EnemyPursuitOrigin();
-		routeFound = Repath( self, goalOrigin );
-		if ( routeFound ) {
-			goalEntity = currentFoe;
-		}
+		selectedOrigin = EnemyPursuitOrigin();
+		selectedEntity = currentFoe;
+		routeFound = navMesh.FindPath( origin, selectedOrigin, selectedPath );
+	}
+
+	// Keep a valid commitment when the preferred replacement has no route.
+	// Trying lower-priority fallbacks first could silently replace it with a
+	// worse goal that never passed the switch margin above.
+	if ( !routeFound && currentValid && !path.IsEmpty() && pathCorner < path.Num() ) {
+		return;
 	}
 
 	if ( !routeFound && desiredType != BOTGOAL_ITEM && item && !itemPath.IsEmpty() ) {
 		desiredType = BOTGOAL_ITEM;
 		desiredPriority = itemPriority;
-		path = itemPath;
-		pathCorner = 0;
-		pathTime = gameLocal.time;
-		repathFailures = 0;
-		noRouteSince = 0;
-		ResetTraversal();
+		selectedPath = itemPath;
+		selectedEntity = item;
+		selectedOrigin = item->GetPhysics()->GetOrigin();
 		routeFound = true;
-		goalEntity = item;
-		goalOrigin = item->GetPhysics()->GetOrigin();
 	}
 	if ( !routeFound && desiredType != BOTGOAL_ENEMY && currentFoe && enemyPriority > 0.0f ) {
 		desiredType = BOTGOAL_ENEMY;
 		desiredPriority = enemyPriority;
 		enemyPathTime = gameLocal.time;
-		goalOrigin = EnemyPursuitOrigin();
-		routeFound = Repath( self, goalOrigin );
-		if ( routeFound ) {
-			goalEntity = currentFoe;
-		}
+		selectedOrigin = EnemyPursuitOrigin();
+		selectedEntity = currentFoe;
+		routeFound = navMesh.FindPath( origin, selectedOrigin, selectedPath );
 	}
 
 	if ( routeFound ) {
+		path = selectedPath;
+		pathCorner = 0;
+		pathTime = gameLocal.time;
+		repathFailures = 0;
+		noRouteSince = 0;
+		ResetTraversal();
+		goalEntity = selectedEntity;
+		goalOrigin = selectedOrigin;
 		goalType = desiredType;
-		if ( desiredType != BOTGOAL_OBJECTIVE ) {
-			objectiveKind = BOTOBJ_NONE;
-			objectiveHoldPosition = false;
-		}
+		objectiveKind = desiredType == BOTGOAL_OBJECTIVE ? objective.kind : BOTOBJ_NONE;
+		objectiveHoldPosition = desiredType == BOTGOAL_OBJECTIVE && objective.holdPosition;
 		goalUtility = desiredPriority;
 		goalCommitUntil = gameLocal.time + BOT_GOAL_COMMIT_MSEC;
 
@@ -1996,19 +2017,6 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 		return;
 	}
 
-	// A preferred candidate can be temporarily unreachable.  Preserve any old
-	// valid route; otherwise fall back to a directed random wander.
-	//
-	// The route has to be re-tested here rather than read off the routeActive
-	// snapshot taken at the top of the scan: the searches above hand the live
-	// path to rvNavMesh::FindPath, which clears it before doing anything else,
-	// so a failed search for the new candidate can have emptied the very route
-	// this guard is trying to keep.  Returning on the stale flag would leave
-	// the bot with no route AND skip the wander that exists to give it one.
-	if ( currentValid && !path.IsEmpty() && pathCorner < path.Num() ) {
-		return;
-	}
-
 	idVec3 roam;
 	rvNavPath roamPath;
 	if ( navMesh.RandomReachablePoint( origin, roam, &roamPath ) ) {
@@ -2023,6 +2031,7 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 		objectiveHoldPosition = false;
 		path = roamPath;
 		pathCorner = 0;
+		goalBestDistance = PathDistanceRemaining( origin );
 		pathTime = gameLocal.time;
 		repathFailures = 0;
 		noRouteSince = 0;
@@ -2030,6 +2039,17 @@ void rvBot::UpdateGoal( idPlayer *self ) {
 		stuckPathCorner = 0;
 		stuckCornerDistance = idMath::INFINITY;
 		ResetTraversal();
+	} else {
+		// The previous route is invalid and all alternatives failed. Do not
+		// keep walking to a vanished pickup while recovery waits for its clock.
+		path.Clear();
+		pathCorner = 0;
+		pathTime = gameLocal.time;
+		ResetTraversal();
+		repathFailures++;
+		if ( !noRouteSince ) {
+			noRouteSince = gameLocal.time;
+		}
 	}
 }
 
@@ -2811,8 +2831,7 @@ void rvBot::UpdateMovement( idPlayer *self, usercmd_t &cmd ) {
 	// closes more eagerly, but no longer tries to use every gun at knife range.
 	idPlayer *foe = enemy.GetEntity();
 
-	if ( hasMoveDir && !committedTravel && foe &&
-		 ( goalType == BOTGOAL_ENEMY || gameLocal.time == enemyLastSeenTime ) ) {
+	if ( hasMoveDir && !committedTravel && foe && gameLocal.time == enemyLastSeenTime ) {
 		idVec3 toFoe = foe->GetPhysics()->GetOrigin() - origin;
 		toFoe.z = 0.0f;
 
@@ -3264,7 +3283,7 @@ void rvBot::UpdateWeapon( idPlayer *self ) {
 	float		range	= BOT_WEAPON_RANGE_SPLIT * 2.0f;
 
 	if ( foe ) {
-		range = ( foe->GetPhysics()->GetOrigin() - self->GetPhysics()->GetOrigin() ).Length();
+		range = ( enemyLastSeenOrigin - self->GetPhysics()->GetOrigin() ).Length();
 	}
 
 	// weaponSkill is the chance the range-correct choice gets made at all.  A

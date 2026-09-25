@@ -1413,6 +1413,9 @@ void rvWeapon::Think ( void ) {
 
 	// Only update the state loop on new frames
  	if ( gameLocal.isNewFrame ) {
+		if ( OpenQ4_TurboWeaponReloadsDisabled() ) {
+			wsfl.reload = wsfl.netReload = wsfl.netEndReload = false;
+		}
 		stateThread.Execute( );
 	}
 
@@ -2278,6 +2281,17 @@ bool rvWeapon::AutoReload ( void ) {
  		return false;
  	}
 	return gameLocal.userInfo[ owner->entityNumber ].GetBool( "ui_autoReload" );
+}
+
+// Check inside each reload state as well as at its callers: a queued state
+// or a save restored mid-reload can otherwise bypass Reload()/AutoReload().
+bool rvWeapon::SkipReload( void ) {
+	if ( !OpenQ4_TurboWeaponReloadsDisabled() ) {
+		return false;
+	}
+	wsfl.reload = wsfl.netReload = wsfl.netEndReload = false;
+	SetState( wsfl.lowerWeapon ? "Lower" : "Idle", 0 );
+	return true;
 }
 
 /*

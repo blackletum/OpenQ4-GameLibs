@@ -2146,7 +2146,10 @@ bool idProgram::CompileText( const char *source, const char *text, bool console 
 
 // RAVEN BEGIN
 // bdube: Make sure the file hasnt already been loaded
-	if ( -1 != fileList.FindIndex ( idStr(source) ) ) {
+	// File includes are idempotent; console snippets are not. Every invocation
+	// of the `script` command uses the source name "console" and creates a new
+	// function. Reusing the file cache silently discarded every later command.
+	if ( !console && -1 != fileList.FindIndex ( idStr(source) ) ) {
 		return true;
 	}
 // RAVEN END

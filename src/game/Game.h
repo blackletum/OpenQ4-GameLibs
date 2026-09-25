@@ -702,7 +702,11 @@ extern rvGameLog *				gameLog;
 //     for scene-resolution rendering with native-resolution composition/UI
 // 46: common exposes a transient game-owned time scale independently of the
 //     public timescale CVar
-const int GAME_API_VERSION		= 46;
+// 47: shared idRenderSystem::ClearRenderTarget carries alpha for transparent
+//     retained UI composition targets; engine and game modules must match.
+// 48: idUserInterface presentation value and text-input queries replace the
+//     public desktop window pointer; rebuild engine and both game modules.
+const int GAME_API_VERSION		= 49;
 
 struct gameImport_t {
 

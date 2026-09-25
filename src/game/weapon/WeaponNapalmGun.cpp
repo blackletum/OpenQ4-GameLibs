@@ -247,6 +247,9 @@ END_CLASS_STATES
 
 
 stateResult_t WeaponNapalmGun::State_Reload( const stateParms_t& parms) {
+	if ( SkipReload() ) {
+		return SRESULT_DONE;
+	}
 	enum {
 		STAGE_INIT,
 		STAGE_WAIT,
@@ -276,6 +279,9 @@ rvWeaponGrenadeLauncher::State_Reload
 ================
 */
 stateResult_t WeaponNapalmGun::State_EmptyReload( const stateParms_t& parms ) {
+	if ( SkipReload() ) {
+		return SRESULT_DONE;
+	}
 	enum {
 		STAGE_INIT,
 		STAGE_WAIT,
